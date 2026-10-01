@@ -1,0 +1,1 @@
+{"name":"classroom-translator-site","private":true,"type":"module","scripts":{"build":"node build.mjs","test":"node --test test/*.test.mjs"},"dependencies":{"buffer":"^6.0.3","fast-xml-parser":"^5.11.2","fflate":"^0.8.3","path-browserify":"^1.0.1","pdfjs-dist":"^6.3.289"},"devDependencies":{"esbuild":"^0.25.0","fake-indexeddb":"^6.2.4"}}
