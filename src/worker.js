@@ -1,5 +1,7 @@
 import assets from './generated-assets.js';
 import {MemberError,memberSession,sharedReady,loginMember,logoutMember,allowSharedRequest} from './member.js';
+import {accountUser,requireAccount,signOutAccount} from './account-server.js';
+import {historyRoute} from './history-server.js';
 const reply=(data,status=200,headers={})=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers}});
 async function readJson(request,max=350000){
  if(!request.headers.get('Content-Type')?.startsWith('application/json'))throw new MemberError('输入格式不正确',415);
@@ -13,12 +15,23 @@ async function readJson(request,max=350000){
 export async function handle(request,upstream=fetch,env={}){
  const url=new URL(request.url);
  if(!url.pathname.startsWith('/api/')){
-  const asset=assets[url.pathname];if(!asset)return new Response('Not found',{status:404});if(request.method!=='GET'&&request.method!=='HEAD')return new Response('Method not allowed',{status:405});
+  const asset=assets[url.pathname==='/profile'?'/':url.pathname];if(!asset)return new Response('Not found',{status:404});if(request.method!=='GET'&&request.method!=='HEAD')return new Response('Method not allowed',{status:405});
   return new Response(request.method==='HEAD'?null:asset.text,{headers:{'Content-Type':asset.type,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Permissions-Policy':'microphone=(self)', 'Content-Security-Policy':"default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self'; img-src 'self' data:; connect-src 'self' wss://api.openai.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"}});
  }
  if(request.headers.get('Origin')&&request.headers.get('Origin')!==url.origin)return reply({error:{message:'不允许跨站请求'}},403);
  if(request.headers.get('Sec-Fetch-Site')==='cross-site')return reply({error:{message:'不允许跨站请求'}},403);
  try{
+  if(url.pathname==='/api/account'&&request.method==='GET')return reply({user:await accountUser(request,env),methods:{phone:false,email:false,wechat:false}});
+  if(url.pathname==='/api/account/logout'&&request.method==='POST'){
+   await readJson(request,4096);return reply({ok:true},200,{'Set-Cookie':await signOutAccount(request,env)});
+  }
+  if(/^\/api\/account\/login\/(phone|email|wechat)$/.test(url.pathname))return reply({error:{message:'该登录方式尚未接入，请稍后再试。'}},503);
+  if(url.pathname==='/api/history'||url.pathname.startsWith('/api/history/')){
+   const user=await requireAccount(request,env);
+   if(request.headers.get('X-Account-ID')&&request.headers.get('X-Account-ID')!==user.id)throw new MemberError('登录账户已变化，请刷新页面后继续。',409);
+   const data=request.method==='PUT'?await readJson(request,url.pathname.includes('/materials/')?1000000:8000000):undefined;
+   return reply(await historyRoute(request,env,user,url.pathname,data));
+  }
   if(url.pathname==='/api/member/status'&&request.method==='GET')return reply({member:!!await memberSession(request,env),sharedReady:sharedReady(env)});
   if(url.pathname==='/api/member/login'&&request.method==='POST'){
    const data=await readJson(request,4096);const cookie=await loginMember(request,env,data.code);return reply({member:true,sharedReady:sharedReady(env)},200,{'Set-Cookie':cookie});

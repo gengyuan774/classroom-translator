@@ -1,10 +1,11 @@
+import {setAccount,accountId,storageDescription} from './storage.js';
 import {refreshAccess,login,logout} from './access.js';
 import {renderNotes} from '../public/format.js';
 import {localApi,downloadNotes} from './local-api.js';
 import {BrowserLive} from './live.js';
 const $=id=>document.getElementById(id);
 let config, current=null, ws=null, stream=null, context=null, capture=null, muted=null, mode='idle', startedAt=0, elapsed=0, tick;
-let materialBusy=false;
+let materialBusy=false, profileUser=null, historyWarning='';
 let flushResolver, wakeLock, partials=new Map(), lastEnded=false;
 const escape=s=>String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const time=ms=>{const s=Math.max(0,Math.floor(ms/1000));return [Math.floor(s/3600),Math.floor(s/60)%60,s%60].map(x=>String(x).padStart(2,'0')).join(':');};
@@ -32,14 +33,14 @@ function render(){
  $('summary-badge').textContent=current.demo?'示例笔记':current.summary?'已生成':current.status==='summary_failed'?'需重试':current.status==='summarizing'?'生成中':'待生成';
  $('export-md').disabled=!current.segments.length&&!current.summary;$('export-html').disabled=$('export-md').disabled;
  $('retry-summary').hidden=(!current.segments.some(s=>s.source)&&!current.materials?.some(m=>m.enabled!==false))||['recording','connecting','finishing'].includes(mode);$('retry-summary').textContent=current.segments.some(s=>s.source)?'重新生成总结':'生成资料预习总结';renderMaterials();if(current.summaryStale)$('summary-badge').textContent='资料已更新 · 待重新总结';
- $('save-state').textContent=current.demo?'演示数据 · 不调用 API':'已保存在当前浏览器';
+ $('save-state').textContent=current.demo?'演示数据 · 不调用 API':(historyWarning?'已保存在此设备 · 账户同步待完成':accountId()?'已保存到账户':'已保存在当前浏览器');
  const warnings=current.warnings || [];if(warnings.length)notice(warnings.at(-1));
 }
 async function history(){
- const list=await api('/api/sessions');$('history-count').textContent=list.length;$('history-select').innerHTML='<option value="">历史课堂</option>'+list.map(s=>`<option value="${s.id}">${escape(s.title)}</option>`).join('');
+ const list=await api('/api/sessions');renderProfileHistory(list);$('history-count').textContent=list.length;$('history-select').innerHTML='<option value="">历史课堂</option>'+list.map(s=>`<option value="${s.id}">${escape(s.title)}</option>`).join('');
  $('history').innerHTML=list.length?list.map(s=>`<button class="history-item ${s.id===current?.id?'active':''}" data-id="${s.id}"><strong>${s.demo?'◌':'▤'} ${escape(s.title)}</strong><small>${new Date(s.createdAt).toLocaleDateString('zh-CN')} · ${s.count} 段${s.demo?' · 示例':''}</small></button>`).join(''):'<div class="history-empty">每一节课，都值得留下。<br>你的课堂记录会出现在这里。</div>';
 }
-function blank(){if(materialBusy)return;current=null;renderMaterials();partials.clear();$('transcript').innerHTML=initialEmpty;$('title').value='';$('breadcrumb-title').textContent='新的开始';$('segment-count').textContent='0 段';$('summary').hidden=true;$('summary-empty').hidden=false;$('summary-badge').textContent='待生成';$('export-md').disabled=true;$('export-html').disabled=true;$('retry-summary').hidden=true;$('timer').textContent='00:00:00';$('partial').hidden=true;$('save-state').textContent='字幕将自动保存在本机';elapsed=0;notice('');controls('idle');history().catch(e=>notice(e.message));}
+function blank(){if(materialBusy)return;showClassroom();current=null;renderMaterials();partials.clear();$('transcript').innerHTML=initialEmpty;$('title').value='';$('breadcrumb-title').textContent='新的开始';$('segment-count').textContent='0 段';$('summary').hidden=true;$('summary-empty').hidden=false;$('summary-badge').textContent='待生成';$('export-md').disabled=true;$('export-html').disabled=true;$('retry-summary').hidden=true;$('timer').textContent='00:00:00';$('partial').hidden=true;$('save-state').textContent=storageDescription();elapsed=0;notice('');controls('idle');history().catch(e=>notice(e.message));}
 async function releaseAudio(){
  stream?.getTracks().forEach(t=>t.stop());stream=null;
  capture?.disconnect();muted?.disconnect();capture=null;muted=null;
@@ -96,7 +97,7 @@ async function begin(){
      if(e.type==='finished'){
        lastEnded=true;current=e.session;await releaseAudio();partials.clear();renderPartial();controls('ended');render();await history();
        if(current.summary && $('auto-export').checked)download('md');
-       if(current.summary)notice('课堂已整理完成，笔记已保存在当前浏览器。'+($('auto-export').checked?' 已发起下载；如未看到文件，可点击下方导出按钮。':''));
+       if(current.summary)notice('课堂已整理完成，'+(accountId()?'笔记已保存到账户。':'笔记已保存在当前浏览器。')+($('auto-export').checked?' 已发起下载；如未看到文件，可点击下方导出按钮。':''));
      }
    };
    ws.onerror=()=>notice('连接失败，请检查网络后重试。');
@@ -206,11 +207,44 @@ $('settings-form').onsubmit=async e=>{e.preventDefault();if(accessBusy||material
 };
 $('member-logout').onclick=async()=>{if(accessBusy||materialLocked())return;lockAccess(true);try{config=await logout();$('member-code').value='';renderAccess();notice('已退出会员。');}catch(e){$('settings-error').textContent=e.message;}finally{lockAccess(false);}};
 $('demo').onclick=async()=>{try{current=await api('/api/sessions',{method:'POST',body:JSON.stringify({demo:true})});controls('ended');render();$('start').hidden=true;notice('这是演示课堂：使用示例字幕与笔记，不采集麦克风，不调用 API。');await history();}catch(e){notice(e.message);}};
-async function openHistory(id){if(!id)return;if(materialBusy||['recording','paused','connecting','finishing'].includes(mode)){notice('请先完成当前操作或结束课堂，再打开其他记录。');return;}try{current=await api('/api/sessions/'+id);$('transcript').innerHTML=initialEmpty;controls(current.status==='ready'?'idle':'ended');elapsed=0;notice('');render();if(current.demo)$('start').hidden=true;await history();}catch(e){notice(e.message);}};
+async function openHistory(id){if(!id)return;if(materialBusy||['recording','paused','connecting','finishing'].includes(mode)){notice('请先完成当前操作或结束课堂，再打开其他记录。');return;}try{showClassroom();current=await api('/api/sessions/'+id);$('transcript').innerHTML=initialEmpty;controls(current.status==='ready'?'idle':'ended');elapsed=0;notice('');render();if(current.demo)$('start').hidden=true;await history();}catch(e){notice(e.message);}};
 $('history').onclick=e=>openHistory(e.target.closest('[data-id]')?.dataset.id);
 $('history-select').onchange=e=>openHistory(e.target.value);
-$('retry-summary').onclick=async()=>{if(!current)return;if(!config.hasKey&&(!current.demo||current.materials?.length)){$('settings').showModal();return;}controls('finishing');notice('正在重新整理课堂笔记…');try{current=await api(`/api/sessions/${current.id}/summary`,{method:'POST'});controls('ended');render();if(current.demo)$('start').hidden=true;if($('auto-export').checked)download('md');notice('总结已生成，完整笔记已保存在当前浏览器。');}catch(e){controls('ended');notice(e.message);render();}};
+$('retry-summary').onclick=async()=>{if(!current)return;if(!config.hasKey&&(!current.demo||current.materials?.length)){$('settings').showModal();return;}controls('finishing');notice('正在重新整理课堂笔记…');try{current=await api(`/api/sessions/${current.id}/summary`,{method:'POST'});controls('ended');render();if(current.demo)$('start').hidden=true;if($('auto-export').checked)download('md');notice('总结已生成，'+(accountId()?'完整笔记已保存到账户。':'完整笔记已保存在当前浏览器。'));}catch(e){controls('ended');notice(e.message);render();}};
 $('export-md').onclick=()=>download('md');$('export-html').onclick=()=>download('html');
 window.addEventListener('beforeunload',e=>{if(materialBusy||['recording','paused','connecting','finishing'].includes(mode)){e.preventDefault();e.returnValue='';}});
 document.addEventListener('visibilitychange',async()=>{if(document.visibilityState==='visible'&&mode==='recording')try{wakeLock=await navigator.wakeLock?.request('screen');}catch{}});
+function profileMessage(text){$('profile-error').textContent=text;$('profile-error').hidden=!text;}
+function renderProfileAccount(){
+ $('profile-login').hidden=!!profileUser;$('profile-signed-in').hidden=!profileUser;$('profile-login-title').textContent=profileUser?'我的账户':'登录';
+ $('profile-account-label').textContent=profileUser?.label||'';$('profile-subtitle').textContent=profileUser?'查看当前账户的课堂历史。':'登录后，课堂历史保存到你的账户。';
+ $('profile-history-scope').textContent=profileUser?'当前账户的记录':'当前浏览器的记录';$('sidebar-save-label').textContent=profileUser?'记录保存到当前账户':'记录保存在当前浏览器';
+}
+function renderProfileHistory(list){
+ $('profile-history-count').textContent=list.length+' 节';
+ $('profile-history-list').innerHTML=list.length?list.map(s=>`<button class="profile-history-item" data-history-id="${s.id}"><strong>${escape(s.title)}</strong><small>${escape(new Date(s.createdAt).toLocaleDateString('zh-CN'))} · ${s.count} 段${s.demo?' · 示例':''}</small></button>`).join(''):'<div class="profile-history-empty">还没有课堂记录</div>';
+}
+async function loadAccount(){
+ try{const response=await fetch('/api/account',{credentials:'same-origin'});if(!response.ok)throw new Error('暂时无法读取账户状态，请稍后刷新重试。');const data=await response.json();profileUser=data.user;setAccount(profileUser);renderProfileAccount();}
+ catch(e){profileMessage(e.message);renderProfileAccount();}
+}
+function showClassroom(){
+ $('profile-page').hidden=true;$('classroom-workspace').hidden=false;$('demo').hidden=false;$('profile-open').removeAttribute('aria-current');
+ $('breadcrumb-title').textContent=current?.title||'新的开始';if(location.pathname==='/profile')window.history.pushState({},'', '/');
+}
+function showProfile(push=true){
+ if(materialLocked()){notice('请先完成当前操作，再打开个人中心。');return;}
+ $('profile-page').hidden=false;$('classroom-workspace').hidden=true;$('demo').hidden=true;$('profile-open').setAttribute('aria-current','page');$('breadcrumb-title').textContent='个人中心';
+ if(push&&location.pathname!=='/profile')window.history.pushState({},'', '/profile');history().catch(e=>profileMessage(e.message));
+}
+$('profile-open').onclick=$('mobile-profile').onclick=e=>{e.preventDefault();showProfile();};$('profile-back').onclick=showClassroom;
+$('profile-history-list').onclick=e=>{const id=e.target.closest('[data-history-id]')?.dataset.historyId;if(id)openHistory(id);};
+function selectLoginTab(tab,focus=false){for(const kind of ['phone','email','wechat']){const active=kind===tab,button=$('login-'+kind+'-tab');button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;$('login-'+kind+'-panel').hidden=!active;if(active&&focus)button.focus();}}
+for(const button of document.querySelectorAll('[data-login-tab]')){button.onclick=()=>selectLoginTab(button.dataset.loginTab);button.onkeydown=e=>{const keys=['phone','email','wechat'],index=keys.indexOf(button.dataset.loginTab);if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();selectLoginTab(keys[(index+(e.key==='ArrowRight'?1:2))%3],true);}};}
+$('account-logout').onclick=async()=>{if(materialLocked())return;$('account-logout').disabled=true;try{const res=await fetch('/api/account/logout',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:'{}'});if(!res.ok)throw new Error('退出失败，请稍后重试。');profileUser=null;setAccount(null);historyWarning='';blank();renderProfileAccount();await history();showProfile();}catch(e){profileMessage(e.message);}finally{$('account-logout').disabled=false;}};
+window.addEventListener('popstate',()=>{if(location.pathname==='/profile')showProfile(false);else showClassroom();});
+window.addEventListener('history-save-warning',e=>{historyWarning=e.detail;notice(e.detail);profileMessage(e.detail);if(current)render();});
+await loadAccount();
 try{config=await refreshAccess();renderAccess();$('setup-hint').hidden=config.hasKey;$('model-info').textContent=`实时转写：${config.transcriptionModel}　翻译 / 总结：${config.textModel}`;await history();renderMaterials();}catch(e){notice('无法打开浏览器存储：'+e.message);$('start').disabled=true;}
+
+if(location.pathname==='/profile')showProfile(false);
