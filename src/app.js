@@ -1,3 +1,4 @@
+import {LANGUAGES,language,direction} from './languages.js';
 import {setAccount,accountId,storageDescription} from './storage.js';
 import {refreshAccess,login,logout} from './access.js';
 import {renderNotes} from '../public/format.js';
@@ -5,7 +6,8 @@ import {localApi,downloadNotes} from './local-api.js';
 import {BrowserLive} from './live.js';
 const $=id=>document.getElementById(id);
 let config, current=null, ws=null, stream=null, context=null, capture=null, muted=null, mode='idle', startedAt=0, elapsed=0, tick;
-let materialBusy=false, profileUser=null, historyWarning='';
+let materialBusy=false, languageBusy=false, selectedLanguage='auto', profileUser=null, historyWarning='';
+$('source-language').innerHTML=LANGUAGES.map(l=>`<option value="${l.code}">${l.label} → 中文</option>`).join('');
 let flushResolver, wakeLock, partials=new Map(), lastEnded=false;
 const escape=s=>String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const time=ms=>{const s=Math.max(0,Math.floor(ms/1000));return [Math.floor(s/3600),Math.floor(s/60)%60,s%60].map(x=>String(x).padStart(2,'0')).join(':');};
@@ -14,13 +16,26 @@ async function api(path,options={}){return localApi(path,options);}
 function controls(next){
  mode=next;const recording=mode==='recording',busy=['connecting','finishing'].includes(mode),live=['recording','paused'].includes(mode);
  $('start').hidden=live || mode==='finishing';$('start').disabled=busy;$('start').textContent=mode==='connecting'?'正在连接…':current?.segments.length&&!current.demo?'继续这节课':'● 开始上课';
- $('pause').hidden=!live;$('pause').textContent=mode==='paused'?'▶ 继续录音':'Ⅱ 暂停';$('finish').hidden=!live && mode!=='finishing';$('finish').disabled=mode==='finishing';
- $('new-class').disabled=busy||live||materialBusy;$('demo').disabled=busy||live||materialBusy;$('title').disabled=busy||live||!!current;
+ $('pause').hidden=!live;$('pause').textContent=mode==='paused'?'▶ 继续录音':'Ⅱ 暂停';$('finish').hidden=!live && mode!=='finishing';$('finish').disabled=mode==='finishing'||languageBusy;$('pause').disabled=languageBusy;
+ $('new-class').disabled=busy||live||materialBusy||languageBusy;$('demo').disabled=busy||live||materialBusy||languageBusy;$('title').disabled=busy||live||!!current;
  $('status-dot').classList.toggle('live',recording);document.querySelector('.meter').classList.toggle('live',recording);
  $('status').textContent=({idle:'准备就绪',connecting:'连接中',recording:'正在听课',paused:'已暂停',finishing:'正在整理课堂',ended:'课堂已结束'})[mode];
- $('status-detail').textContent=recording?'麦克风已开启 · 正在接收英语语音':mode==='paused'?'点击继续录音，接着记录课堂':mode==='finishing'?'请保持页面打开，笔记正在生成':'使用电脑麦克风 · 英语 → 中文';
- $('retry-summary').disabled=busy||live||materialBusy;updateMaterialControls();
+ $('status-detail').textContent=recording?'麦克风已开启 · '+direction(selectedLanguage):mode==='paused'?'点击继续录音，接着记录课堂':mode==='finishing'?'请保持页面打开，笔记正在生成':'使用电脑麦克风 · '+direction(selectedLanguage);
+ $('retry-summary').disabled=busy||live||materialBusy||languageBusy;updateMaterialControls();updateLanguageUI();
 }
+function updateLanguageUI(){
+ $('source-language').value=selectedLanguage;
+ $('source-language').disabled=materialBusy||languageBusy||!!current?.demo||['recording','connecting','finishing'].includes(mode);
+ $('source-language').title=mode==='recording'?'暂停录音后可切换语言':'';
+ $('language-pair').textContent=direction(selectedLanguage);
+}
+$('source-language').onchange=async e=>{
+ const code=e.target.value,previous=selectedLanguage;languageBusy=true;controls(mode);
+ try{
+  if(current)current=mode==='paused'&&ws?.readyState===1?await ws.changeLanguage(code):await api('/api/sessions/'+current.id,{method:'PATCH',body:JSON.stringify({sourceLanguage:code})});
+  selectedLanguage=code;notice(mode==='paused'?'已选择 '+direction(code)+'，继续录音后生效。':'');if(current)render();
+ }catch(e){selectedLanguage=previous;notice(e.message);}finally{languageBusy=false;controls(mode);}
+};
 function render(){
  if(!current)return;
  const visibleSegments=current.segments.filter(s=>s.source?.trim()||s.translation?.trim());
@@ -39,7 +54,7 @@ async function history(){
  const list=await api('/api/sessions');renderProfileHistory(list);$('history-count').textContent=list.length;$('history-select').innerHTML='<option value="">历史课堂</option>'+list.map(s=>`<option value="${s.id}">${escape(s.title)}</option>`).join('');
  $('history').innerHTML=list.length?list.map(s=>`<button class="history-item ${s.id===current?.id?'active':''}" data-id="${s.id}"><strong>${s.demo?'◌':'▤'} ${escape(s.title)}</strong><small>${new Date(s.createdAt).toLocaleDateString('zh-CN')} · ${s.count} 段${s.demo?' · 示例':''}</small></button>`).join(''):'<div class="history-empty">每一节课，都值得留下。<br>你的课堂记录会出现在这里。</div>';
 }
-function blank(){if(materialBusy)return;showClassroom();current=null;renderMaterials();partials.clear();$('transcript').innerHTML=initialEmpty;$('title').value='';$('breadcrumb-title').textContent='新的开始';$('segment-count').textContent='0 段';$('summary').hidden=true;$('summary-empty').hidden=false;$('summary-badge').textContent='待生成';$('export-md').disabled=true;$('export-html').disabled=true;$('retry-summary').hidden=true;$('timer').textContent='00:00:00';$('partial').hidden=true;$('save-state').textContent=storageDescription();elapsed=0;notice('');controls('idle');history().catch(e=>notice(e.message));}
+function blank(){if(materialBusy||languageBusy)return;showClassroom();current=null;selectedLanguage='auto';renderMaterials();partials.clear();$('transcript').innerHTML=initialEmpty;$('title').value='';$('breadcrumb-title').textContent='新的开始';$('segment-count').textContent='0 段';$('summary').hidden=true;$('summary-empty').hidden=false;$('summary-badge').textContent='待生成';$('export-md').disabled=true;$('export-html').disabled=true;$('retry-summary').hidden=true;$('timer').textContent='00:00:00';$('partial').hidden=true;$('save-state').textContent=storageDescription();elapsed=0;notice('');controls('idle');history().catch(e=>notice(e.message));}
 async function releaseAudio(){
  stream?.getTracks().forEach(t=>t.stop());stream=null;
  capture?.disconnect();muted?.disconnect();capture=null;muted=null;
@@ -71,7 +86,7 @@ async function begin(){
        document.querySelectorAll('.meter i').forEach((bar,i)=>bar.style.height=(4+level*(10+Math.sin(i*2.1)*8))+'px');
      }
    };
-   if(!current)current=await api('/api/sessions',{method:'POST',body:JSON.stringify({title:$('title').value.trim()||'课堂 '+new Date().toLocaleDateString('zh-CN')})});
+   if(!current)current=await api('/api/sessions',{method:'POST',body:JSON.stringify({sourceLanguage:selectedLanguage,title:$('title').value.trim()||'课堂 '+new Date().toLocaleDateString('zh-CN')})});
    render();await history();
    ws=new BrowserLive();
    ws.onopen=()=>send({type:'start',id:current.id});
@@ -123,7 +138,7 @@ async function finish(){
  controls('finishing');await releaseAudio();send({type:'finish'});
 }
 function download(format){if(current)downloadNotes(current,format);}
-function materialLocked(){return materialBusy||['recording','paused','connecting','finishing'].includes(mode);}
+function materialLocked(){return materialBusy||languageBusy||['recording','paused','connecting','finishing'].includes(mode);}
 function updateMaterialControls(){
  const locked=materialLocked();$('material-add').disabled=locked;$('try-open').disabled=locked||!!current?.demo;
  $('start').disabled=locked&&mode!=='recording'&&mode!=='paused';
@@ -136,7 +151,7 @@ function renderMaterials(){
  updateMaterialControls();
 }
 async function ensureClass(){
- if(!current){current=await api('/api/sessions',{method:'POST',body:JSON.stringify({title:$('title').value.trim()||'课堂 '+new Date().toLocaleDateString('zh-CN')})});render();await history();}
+ if(!current){current=await api('/api/sessions',{method:'POST',body:JSON.stringify({sourceLanguage:selectedLanguage,title:$('title').value.trim()||'课堂 '+new Date().toLocaleDateString('zh-CN')})});render();await history();}
  return current;
 }
 async function uploadMaterials(files){
@@ -179,7 +194,7 @@ $('trial-close').onclick=()=>{if(!materialBusy)$('trial-dialog').close();};
 $('trial-dialog').addEventListener('cancel',e=>{if(materialBusy)e.preventDefault();});
 $('trial-run').onclick=async()=>{
  if(materialBusy)return;
- const text=$('trial-input').value.trim();if(!text){$('trial-status').hidden=false;$('trial-status').textContent='先输入一段英语课堂内容。';return;}
+ const text=$('trial-input').value.trim();if(!text){$('trial-status').hidden=false;$('trial-status').textContent='先输入一段课堂原文。';return;}
  if(!config.hasKey){$('trial-dialog').close();$('settings').showModal();return;}
  materialBusy=true;controls(mode);$('trial-run').disabled=true;$('trial-close').disabled=true;$('trial-input').disabled=true;$('trial-status').hidden=false;$('trial-status').textContent='正在参考资料生成译文与总结…';showTrial(null);
  try{await ensureClass();const result=await api(`/api/sessions/${current.id}/try`,{method:'POST',body:JSON.stringify({text})});current.lastTrial=result;showTrial(result);$('trial-status').textContent='试译完成，结果已保存在这节课中。测试内容未加入课堂字幕。';}catch(e){$('trial-status').textContent=e.message;}finally{materialBusy=false;controls(mode);$('trial-run').disabled=false;$('trial-close').disabled=false;$('trial-input').disabled=false;}
@@ -205,13 +220,13 @@ $('settings-form').onsubmit=async e=>{e.preventDefault();if(accessBusy||material
  catch(e){$('settings-error').textContent=e.message;}finally{lockAccess(false);}
 };
 $('member-logout').onclick=async()=>{if(accessBusy||materialLocked())return;lockAccess(true);try{config=await logout();$('member-code').value='';renderAccess();notice('已退出会员。');}catch(e){$('settings-error').textContent=e.message;}finally{lockAccess(false);}};
-$('demo').onclick=async()=>{try{current=await api('/api/sessions',{method:'POST',body:JSON.stringify({demo:true})});controls('ended');render();$('start').hidden=true;notice('这是演示课堂：使用示例字幕与笔记，不采集麦克风，不调用 API。');await history();}catch(e){notice(e.message);}};
-async function openHistory(id){if(!id)return;if(materialBusy||['recording','paused','connecting','finishing'].includes(mode)){notice('请先完成当前操作或结束课堂，再打开其他记录。');return;}try{showClassroom();current=await api('/api/sessions/'+id);$('transcript').innerHTML=initialEmpty;controls(current.status==='ready'?'idle':'ended');elapsed=0;notice('');render();if(current.demo)$('start').hidden=true;await history();}catch(e){notice(e.message);}};
+$('demo').onclick=async()=>{try{current=await api('/api/sessions',{method:'POST',body:JSON.stringify({demo:true})});selectedLanguage='en';controls('ended');render();$('start').hidden=true;notice('这是演示课堂：使用示例字幕与笔记，不采集麦克风，不调用 API。');await history();}catch(e){notice(e.message);}};
+async function openHistory(id){if(!id)return;if(materialBusy||languageBusy||['recording','paused','connecting','finishing'].includes(mode)){notice('请先完成当前操作或结束课堂，再打开其他记录。');return;}try{showClassroom();current=await api('/api/sessions/'+id);selectedLanguage=language(current.sourceLanguage).code;$('transcript').innerHTML=initialEmpty;controls(current.status==='ready'?'idle':'ended');elapsed=0;notice('');render();if(current.demo)$('start').hidden=true;await history();}catch(e){notice(e.message);}};
 $('history').onclick=e=>openHistory(e.target.closest('[data-id]')?.dataset.id);
 $('history-select').onchange=e=>openHistory(e.target.value);
 $('retry-summary').onclick=async()=>{if(!current)return;if(!config.hasKey&&(!current.demo||current.materials?.length)){$('settings').showModal();return;}controls('finishing');notice('正在重新整理课堂笔记…');try{current=await api(`/api/sessions/${current.id}/summary`,{method:'POST'});controls('ended');render();if(current.demo)$('start').hidden=true;if($('auto-export').checked)download('md');notice('总结已生成，'+(accountId()?'完整笔记已保存到账户。':'完整笔记已保存在当前浏览器。'));}catch(e){controls('ended');notice(e.message);render();}};
 $('export-md').onclick=()=>download('md');$('export-html').onclick=()=>download('html');
-window.addEventListener('beforeunload',e=>{if(materialBusy||['recording','paused','connecting','finishing'].includes(mode)){e.preventDefault();e.returnValue='';}});
+window.addEventListener('beforeunload',e=>{if(materialBusy||languageBusy||['recording','paused','connecting','finishing'].includes(mode)){e.preventDefault();e.returnValue='';}});
 document.addEventListener('visibilitychange',async()=>{if(document.visibilityState==='visible'&&mode==='recording')try{wakeLock=await navigator.wakeLock?.request('screen');}catch{}});
 function profileMessage(text){$('profile-error').textContent=text;$('profile-error').hidden=!text;}
 function renderProfileAccount(){

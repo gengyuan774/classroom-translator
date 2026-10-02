@@ -1,6 +1,7 @@
 import {saveSession,getSession,listSessions,saveMaterial,getMaterial,removeMaterial} from './storage.js';
 import {summarize,translateSegment,exportHtml,exportMarkdown} from './core.js';
 import {getKey,accessConfig,setOwnKey} from './access.js';
+import {validLanguage,setSessionLanguage} from './languages.js';
 export {getKey} from './access.js';
 export const busy=new Set();
 export async function complete(s){
@@ -20,7 +21,8 @@ export async function localApi(route,options={}){
  }
  if(route==='/api/sessions'){
   if(method==='GET')return listSessions();
-  const s={id:crypto.randomUUID(),title:String(data.title||'未命名课堂').slice(0,120),createdAt:new Date().toISOString(),status:'ready',segments:[],materials:[],warnings:[],summary:'',demo:data.demo===true};
+  const sourceLanguage=data.demo===true?'en':(data.sourceLanguage??'auto');if(!validLanguage(sourceLanguage))throw new Error('请选择支持的语言');
+  const s={id:crypto.randomUUID(),title:String(data.title||'未命名课堂').slice(0,120),createdAt:new Date().toISOString(),status:'ready',segments:[],materials:[],warnings:[],summary:'',sourceLanguage,demo:data.demo===true};
   if(s.demo){s.title='经济学入门 · 演示课堂';s.status='completed';s.summary=demoSummary;s.segments=[{id:'demo',source:'Opportunity cost is the value of the next best alternative that you give up.',translation:'机会成本是你放弃的最佳替代方案的价值。',offset:0}];}
   await saveSession(s);return s;
  }
@@ -29,7 +31,7 @@ export async function localApi(route,options={}){
  const [,id,action,materialId]=match;
  if(busy.has(id)&&method!=='GET')throw new Error('请先完成当前课堂操作');
  const s=await getSession(id);
- if(!action)return s;
+ if(!action){if(method==='PATCH'){if(s.demo)throw new Error('演示课堂使用固定英语内容');setSessionLanguage(s,data.sourceLanguage);await saveSession(s);}return s;}
  if(action==='materials'&&method==='GET'){if(!materialId)return s.materials; if(!s.materials.some(m=>m.id===materialId))throw new Error('这份资料不属于当前课堂');return getMaterial(id,materialId);}
  busy.add(id);
  try{
@@ -50,7 +52,7 @@ export async function localApi(route,options={}){
   }
   if(action==='summary'){if(s.demo&&!s.materials.length)return s;return await complete(s);}
   if(action==='try'){
-   const source=String(data.text||'').trim();if(!source||source.length>6000)throw new Error('请输入 1–6000 字符的英语片段');
+   const source=String(data.text||'').trim();if(!source||source.length>6000)throw new Error('请输入 1–6000 字符的课堂片段');
    const trial={...s,segments:[{id:'trial',offset:0,source}],warnings:[]};const result=await translateSegment(trial,getKey(),source);const summary=await summarize(trial,getKey());s.lastTrial={source,...result,summary,createdAt:new Date().toISOString()};await saveSession(s);return s.lastTrial;
   }
  }finally{busy.delete(id);}

@@ -1,4 +1,5 @@
 import {MemberError} from './member.js';
+import {validLanguage} from './languages.js';
 const uuid=value=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value);
 const storage=env=>{if(!env.DB||!env.BUCKET)throw new MemberError('历史记录保存服务暂不可用，请稍后重试。');return env;};
 async function record(env,owner,id){return env.DB.prepare('SELECT * FROM account_classes WHERE account_id = ? AND id = ?').bind(owner,id).first();}
@@ -6,9 +7,10 @@ async function readObject(env,key){const object=await env.BUCKET.get(key);if(!ob
 const removeObject=(env,key)=>env.BUCKET.delete(key).catch(()=>{});
 const pick=(source,keys)=>Object.fromEntries(keys.filter(k=>source[k]!==undefined).map(k=>[k,source[k]]));
 function cleanSession(s,id){
+ if(s?.sourceLanguage!==undefined&&!validLanguage(s.sourceLanguage))throw new MemberError('请选择支持的语言。',400);
  if(!s||s.id!==id||typeof s.title!=='string'||s.title.length>120||!Number.isFinite(Date.parse(s.createdAt))||!Array.isArray(s.segments)||s.segments.length>30000||!Array.isArray(s.materials)||s.materials.length>10||!s.materials.every(m=>uuid(m.id))||!['ready','recording','paused','finishing','summarizing','completed','summary_failed','interrupted'].includes(s.status))throw new MemberError('课堂记录格式不正确。',400);
  if(!s.segments.every(r=>r&&typeof r.id==='string'&&typeof (r.source||'')==='string'&&typeof (r.translation||'')==='string'))throw new MemberError('课堂字幕格式不正确。',400);
- return pick(s,['id','title','createdAt','status','segments','materials','warnings','summary','demo','summarySources','summaryScope','summaryStale','summaryError','lastTrial','endedAt']);
+ return pick(s,['id','title','createdAt','status','segments','materials','warnings','summary','demo','summarySources','summaryScope','summaryStale','summaryError','lastTrial','endedAt','sourceLanguage']);
 }
 export async function historyRoute(request,env,user,path,data){
  storage(env);const owner=user.id;

@@ -2,6 +2,7 @@ import assets from './generated-assets.js';
 import {MemberError,memberSession,sharedReady,loginMember,logoutMember,allowSharedRequest} from './member.js';
 import {accountUser,requireAccount,signOutAccount} from './account-server.js';
 import {historyRoute} from './history-server.js';
+import {transcriptionConfig,validLanguage} from './languages.js';
 const reply=(data,status=200,headers={})=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers}});
 async function readJson(request,max=350000){
  if(!request.headers.get('Content-Type')?.startsWith('application/json'))throw new MemberError('输入格式不正确',415);
@@ -45,7 +46,8 @@ export async function handle(request,upstream=fetch,env={}){
   if(!shared&&!/^Bearer sk-[\w-]{10,500}$/.test(auth||''))return reply({error:{message:'请输入会员码或自己的 OpenAI API Key'}},401);
   const data=await readJson(request);let endpoint,payload;
   if(url.pathname.endsWith('/token')){
-   endpoint='realtime/client_secrets';payload={expires_after:{anchor:'created_at',seconds:60},session:{type:'transcription',audio:{input:{format:{type:'audio/pcm',rate:24000},transcription:{model:'gpt-live-transcribe',languages:['en'],delay:'low',prompt:'An English classroom lecture. Course: '+String(data.title||'').slice(0,120)},turn_detection:null}}}};
+   const sourceLanguage=data.sourceLanguage??'en';if(!validLanguage(sourceLanguage))throw new MemberError('请选择支持的语言',400);
+   endpoint='realtime/client_secrets';payload={expires_after:{anchor:'created_at',seconds:60},session:{type:'transcription',audio:{input:{format:{type:'audio/pcm',rate:24000},transcription:transcriptionConfig(sourceLanguage,data.title),turn_detection:null}}}};
   }else{
    if(typeof data.input!=='string'||typeof data.instructions!=='string')return reply({error:{message:'输入格式不正确'}},400);
    if(data.input.length+data.instructions.length>80000)return reply({error:{message:'输入内容过长，请减少参考资料后重试。'}},413);
