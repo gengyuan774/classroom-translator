@@ -1,3 +1,4 @@
+import {authHeaders} from './access.js';
 import {Buffer} from 'buffer';
 import {getSession,saveSession} from './storage.js';
 import {AudioTurns,translateSegment} from './core.js';
@@ -27,7 +28,7 @@ export class BrowserLive{
  }
  async connect(){
   if(this.upstream){this.upstream.onclose=null;this.upstream.close();}clearTimeout(this.limitTimer);clearTimeout(this.connectTimer);
-  const response=await fetch('/api/openai/token',{method:'POST',headers:{Authorization:'Bearer '+getKey(),'Content-Type':'application/json'},body:JSON.stringify({title:this.session.title}),signal:AbortSignal.timeout(20000)});
+  const response=await fetch('/api/openai/token',{method:'POST',headers:{...authHeaders(getKey()),'Content-Type':'application/json'},body:JSON.stringify({title:this.session.title}),signal:AbortSignal.timeout(20000)});
   const data=await response.json();if(!response.ok)throw new Error(data.error?.message||data.error||'无法创建实时转写连接');
   const secret=data.value||data.client_secret?.value;if(!secret)throw new Error('没有取得实时连接凭据');
   const upstream=new WebSocket('wss://api.openai.com/v1/realtime?intent=transcription',['realtime','openai-insecure-api-key.'+secret]);this.upstream=upstream;this.connectedAt=Date.now();let bytes=0;

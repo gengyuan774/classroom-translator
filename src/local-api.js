@@ -1,7 +1,7 @@
 import {saveSession,getSession,listSessions,saveMaterial,getMaterial,removeMaterial} from './storage.js';
 import {summarize,translateSegment,exportHtml,exportMarkdown} from './core.js';
-let apiKey='';
-export const getKey=()=>{if(!apiKey)throw new Error('请填写你自己的 OpenAI API Key');return apiKey;};
+import {getKey,accessConfig,setOwnKey} from './access.js';
+export {getKey} from './access.js';
 export const busy=new Set();
 export async function complete(s){
  try{s.status='summarizing';await saveSession(s);s.summary=await summarize(s,getKey());s.status='completed';delete s.summaryError;await saveSession(s);return s;}
@@ -15,8 +15,8 @@ const demoSummary='## 课堂概览\n本节示例介绍机会成本：做出一�
 export async function localApi(route,options={}){
  const method=options.method||'GET';const data=typeof options.body==='string'?JSON.parse(options.body):{};
  if(route==='/api/config'){
-  if(method==='POST'){if(typeof data.key!=='string'||!/^sk-[\w-]{10,500}$/.test(data.key.trim()))throw new Error('请输入有效格式的 OpenAI API Key');apiKey=data.key.trim();return {ok:true};}
-  return {hasKey:!!apiKey,token:'browser-local',transcriptionModel:'gpt-live-transcribe',textModel:'gpt-4.1-mini'};
+  if(method==='POST')return setOwnKey(data.key);
+  return accessConfig();
  }
  if(route==='/api/sessions'){
   if(method==='GET')return listSessions();

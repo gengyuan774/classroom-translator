@@ -28,7 +28,7 @@ test('edge enforces caller key, same origin and fixed upstream model',async()=>{
 });
 test('ephemeral credentials only configure transcription',async()=>{
  let payload;await handle(request('/api/openai/token',{title:'Economics',session:{type:'realtime'}}),async(url,init)=>{assert.equal(url,'https://api.openai.com/v1/realtime/client_secrets');payload=JSON.parse(init.body);return Response.json({value:'ephemeral'});});
- assert.equal(payload.session.type,'transcription');assert.equal(payload.expires_after.seconds,600);assert.equal(payload.session.audio.input.format.rate,24000);
+ assert.equal(payload.session.type,'transcription');assert.equal(payload.expires_after.seconds,60);assert.equal(payload.session.audio.input.format.rate,24000);
 });
 test('PPTX follows slide order and rejects old PPT or image-only content',async()=>{
  const zip=zipSync({'ppt/presentation.xml':strToU8('<p:presentation><p:sldIdLst><p:sldId r:id="r2"/><p:sldId r:id="r1"/></p:sldIdLst></p:presentation>'),'ppt/_rels/presentation.xml.rels':strToU8('<Relationships><Relationship Id="r1" Target="slides/slide1.xml"/><Relationship Id="r2" Target="slides/slide2.xml"/></Relationships>'),'ppt/slides/slide1.xml':strToU8('<p:sld><a:p><a:r><a:t>Second: trade-off</a:t></a:r></a:p></p:sld>'),'ppt/slides/slide2.xml':strToU8('<p:sld><a:p><a:r><a:t>First: opportunity cost</a:t></a:r></a:p></p:sld>')});

@@ -1,3 +1,4 @@
+import {refreshAccess,login,logout} from './access.js';
 import {renderNotes} from '../public/format.js';
 import {localApi,downloadNotes} from './local-api.js';
 import {BrowserLive} from './live.js';
@@ -185,9 +186,25 @@ $('trial-run').onclick=async()=>{
 };
 const initialEmpty=$('transcript').innerHTML;
 $('new-class').onclick=blank;$('start').onclick=begin;$('pause').onclick=pauseRecording;$('finish').onclick=finish;
-$('mobile-settings').onclick=$('settings-open').onclick=$('setup-open').onclick=()=>{$('settings-error').textContent='';$('settings').showModal();};
-$('settings-close').onclick=()=>{$('api-key').value='';$('settings').close();};
-$('settings-form').onsubmit=async e=>{e.preventDefault();try{await api('/api/config',{method:'POST',body:JSON.stringify({key:$('api-key').value})});config.hasKey=true;$('api-key').value='';$('settings').close();$('setup-hint').hidden=true;notice('连接设置已保存。开始录音时将验证 API 权限。');}catch(e){$('settings-error').textContent=e.message;}};
+let accessTab='member',accessBusy=false;
+function selectAccess(tab){accessTab=tab;$('member-pane').hidden=tab!=='member';$('key-pane').hidden=tab!=='key';$('access-member').setAttribute('aria-pressed',String(tab==='member'));$('access-key').setAttribute('aria-pressed',String(tab==='key'));$('connection-save').textContent=tab==='member'?'验证会员码':'保存连接';$('get-key-link').hidden=tab!=='key';$('settings-error').textContent='';}
+function renderAccess(){
+ $('setup-hint').hidden=config.hasKey;$('member-logout').hidden=!config.member;
+ $('member-status').textContent=config.member?(config.sharedReady?'会员已验证，可以使用共享服务。':'会员已验证；管理员尚未配置共享 API，暂时不能开始翻译。'):'';
+ $('settings-open').textContent=config.accessMode==='member'?(config.sharedReady?'✓ 会员已启用':'会员已验证 · 待开通'):config.accessMode==='key'?'✓ 个人 API 已连接':'⚙ 连接设置';
+}
+function openSettings(){if(materialLocked()){notice('请先完成当前操作或结束课堂，再更换连接方式。');return;}$('settings-error').textContent='';selectAccess(config?.accessMode==='key'?'key':'member');renderAccess();$('settings').showModal();}
+$('mobile-settings').onclick=$('settings-open').onclick=$('setup-open').onclick=openSettings;
+$('access-member').onclick=()=>selectAccess('member');$('access-key').onclick=()=>selectAccess('key');
+$('settings-close').onclick=()=>{if(accessBusy)return;$('api-key').value='';$('member-code').value='';$('settings').close();};
+$('settings').addEventListener('cancel',e=>{if(accessBusy)e.preventDefault();});
+function lockAccess(value){accessBusy=value;for(const id of ['connection-save','member-logout','access-member','access-key','settings-close'])$(id).disabled=value;}
+$('settings-form').onsubmit=async e=>{e.preventDefault();if(accessBusy||materialLocked())return;lockAccess(true);$('settings-error').textContent='';
+ try{if(accessTab==='member'){config=await login($('member-code').value);$('member-code').value='';}else{config=await api('/api/config',{method:'POST',body:JSON.stringify({key:$('api-key').value})});$('api-key').value='';}renderAccess();
+ if(config.hasKey){$('settings').close();notice(config.accessMode==='member'?'会员已启用，翻译和总结使用共享服务。':'个人 API 连接已保存。');}}
+ catch(e){$('settings-error').textContent=e.message;}finally{lockAccess(false);}
+};
+$('member-logout').onclick=async()=>{if(accessBusy||materialLocked())return;lockAccess(true);try{config=await logout();$('member-code').value='';renderAccess();notice('已退出会员。');}catch(e){$('settings-error').textContent=e.message;}finally{lockAccess(false);}};
 $('demo').onclick=async()=>{try{current=await api('/api/sessions',{method:'POST',body:JSON.stringify({demo:true})});controls('ended');render();$('start').hidden=true;notice('这是演示课堂：使用示例字幕与笔记，不采集麦克风，不调用 API。');await history();}catch(e){notice(e.message);}};
 async function openHistory(id){if(!id)return;if(materialBusy||['recording','paused','connecting','finishing'].includes(mode)){notice('请先完成当前操作或结束课堂，再打开其他记录。');return;}try{current=await api('/api/sessions/'+id);$('transcript').innerHTML=initialEmpty;controls(current.status==='ready'?'idle':'ended');elapsed=0;notice('');render();if(current.demo)$('start').hidden=true;await history();}catch(e){notice(e.message);}};
 $('history').onclick=e=>openHistory(e.target.closest('[data-id]')?.dataset.id);
@@ -196,4 +213,4 @@ $('retry-summary').onclick=async()=>{if(!current)return;if(!config.hasKey&&(!cur
 $('export-md').onclick=()=>download('md');$('export-html').onclick=()=>download('html');
 window.addEventListener('beforeunload',e=>{if(materialBusy||['recording','paused','connecting','finishing'].includes(mode)){e.preventDefault();e.returnValue='';}});
 document.addEventListener('visibilitychange',async()=>{if(document.visibilityState==='visible'&&mode==='recording')try{wakeLock=await navigator.wakeLock?.request('screen');}catch{}});
-try{config=await api('/api/config');$('setup-hint').hidden=config.hasKey;$('model-info').textContent=`实时转写：${config.transcriptionModel}　翻译 / 总结：${config.textModel}`;await history();renderMaterials();}catch(e){notice('无法打开浏览器存储：'+e.message);$('start').disabled=true;}
+try{config=await refreshAccess();renderAccess();$('setup-hint').hidden=config.hasKey;$('model-info').textContent=`实时转写：${config.transcriptionModel}　翻译 / 总结：${config.textModel}`;await history();renderMaterials();}catch(e){notice('无法打开浏览器存储：'+e.message);$('start').disabled=true;}

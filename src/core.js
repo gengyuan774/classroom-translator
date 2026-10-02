@@ -1,3 +1,4 @@
+import {authHeaders} from './access.js';
 import {renderNotes} from '../public/format.js';
 import {activeMaterials,referenceContext,sourceList} from './materials.js';
 export const timestamp = ms => {
@@ -19,7 +20,7 @@ export function chunks(text, max = 16000) {
 export async function generateText(key, instructions, input, {fetcher = fetch, maxTokens = 4000} = {}) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const res = await fetcher('/api/openai/responses', {
-      method:'POST', headers:{Authorization:`Bearer ${key}`, 'Content-Type':'application/json'},
+      method:'POST', headers:{...authHeaders(key), 'Content-Type':'application/json'},
       body:JSON.stringify({model:'gpt-4.1-mini', instructions, input, store:false, max_output_tokens:maxTokens}),
       signal:AbortSignal.timeout(60000)
     });
@@ -27,7 +28,7 @@ export async function generateText(key, instructions, input, {fetcher = fetch, m
     if (!res.ok) {
       if ((res.status === 429 || res.status >= 500) && attempt < 2) { await new Promise(r => setTimeout(r, 1000 * 2 ** attempt)); continue; }
       const details = String(data.error?.message || '').replace(/sk-[A-Za-z0-9_-]+/g, '[已隐藏]');
-      throw new Error(res.status === 401 ? 'API Key 无效，请在设置中重新填写。' : `OpenAI 请求失败（${res.status}）：${details.slice(0,300)}`);
+      throw new Error(res.status === 401 ? (key==='member'?'会员登录已失效，请重新输入会员码。':'API Key 无效，请在设置中重新填写。') : `OpenAI 请求失败（${res.status}）：${details.slice(0,300)}`);
     }
     if (data.status === 'incomplete') throw new Error('生成内容超出长度限制，请重试。');
     const text = data.output?.flatMap(x => x.content || []).filter(x => x.type === 'output_text').map(x => x.text).join('\n');
