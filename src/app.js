@@ -23,12 +23,11 @@ function controls(next){
 }
 function render(){
  if(!current)return;
- $('breadcrumb-title').textContent=current.title;$('title').value=current.title;$('segment-count').textContent=`${current.segments.length} 段`;
- if(current.segments.length){
+ const visibleSegments=current.segments.filter(s=>s.source?.trim()||s.translation?.trim());
+ $('breadcrumb-title').textContent=current.title;$('title').value=current.title;$('segment-count').textContent=`${visibleSegments.length} 段`;
  const container=$('transcript');const nearBottom=container.scrollHeight-container.scrollTop-container.clientHeight<90;
- container.innerHTML=current.segments.map(s=>`<article class="segment"><time>${time(s.offset)}</time><p class="source">${escape(s.source || '正在识别…')}</p><p class="${s.translation?'translation':'pending'}">${escape(s.translation || (s.error?'翻译未完成':'正在翻译…'))}</p>${s.error?`<p class="error">${escape(s.error)}</p>`:''}</article>`).join('');
+ container.innerHTML=visibleSegments.length?visibleSegments.map(s=>`<article class="segment"><time>${time(s.offset)}</time>${s.source?.trim()?`<p class="source">${escape(s.source)}</p>`:''}${s.translation?.trim()?`<p class="translation">${escape(s.translation)}</p>`:''}${s.error?`<p class="error">${escape(s.error)}</p>`:''}</article>`).join(''):(current.segments.length?'':initialEmpty);
  if($('autoscroll').checked && nearBottom)container.scrollTop=container.scrollHeight;
- }
  $('summary').hidden=!current.summary;$('summary-empty').hidden=!!current.summary;$('summary').innerHTML=renderNotes(current.summary);
  $('summary-badge').textContent=current.demo?'示例笔记':current.summary?'已生成':current.status==='summary_failed'?'需重试':current.status==='summarizing'?'生成中':'待生成';
  $('export-md').disabled=!current.segments.length&&!current.summary;$('export-html').disabled=$('export-md').disabled;
