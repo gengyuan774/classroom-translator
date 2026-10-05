@@ -1,4 +1,4 @@
-import {saveSession,getSession,listSessions,saveMaterial,getMaterial,removeMaterial} from './storage.js';
+import {getMajorPreference,saveSession,getSession,listSessions,saveMaterial,getMaterial,removeMaterial} from './storage.js';
 import {summarize,translateSegment} from './core.js';
 import {getKey,accessConfig,setOwnKey} from './access.js';
 import {validLanguage,setSessionLanguage} from './languages.js';
@@ -22,7 +22,7 @@ export async function localApi(route,options={}){
  if(route==='/api/sessions'){
   if(method==='GET')return listSessions();
   const sourceLanguage=data.demo===true?'en':(data.sourceLanguage??'auto');if(!validLanguage(sourceLanguage))throw new Error('请选择支持的语言');
-  const s={id:crypto.randomUUID(),title:String(data.title||'未命名课堂').slice(0,120),createdAt:new Date().toISOString(),status:'ready',segments:[],materials:[],warnings:[],summary:'',sourceLanguage,demo:data.demo===true};
+  const s={id:crypto.randomUUID(),title:String(data.title||'未命名课堂').slice(0,120),createdAt:new Date().toISOString(),status:'ready',segments:[],materials:[],warnings:[],summary:'',sourceLanguage,major:await getMajorPreference(),demo:data.demo===true};
   if(s.demo){s.title='经济学入门 · 演示课堂';s.status='completed';s.summary=demoSummary;s.segments=[{id:'demo',source:'Opportunity cost is the value of the next best alternative that you give up.',translation:'机会成本是你放弃的最佳替代方案的价值。',offset:0}];}
   await saveSession(s);return s;
  }
@@ -50,9 +50,10 @@ export async function localApi(route,options={}){
    }
    s.lastTrial=null;if(s.summary)s.summaryStale=true;await saveSession(s);return s;
   }
-  if(action==='summary'){if(s.demo&&!s.materials.length)return s;return await complete(s);}
+  if(action==='summary'){if(s.demo&&!s.materials.length)return s;s.major=await getMajorPreference();return await complete(s);}
   if(action==='try'){
    const source=String(data.text||'').trim();if(!source||source.length>6000)throw new Error('请输入 1–6000 字符的课堂片段');
+   s.major=await getMajorPreference();
    const trial={...s,segments:[{id:'trial',offset:0,source}],warnings:[]};const result=await translateSegment(trial,getKey(),source);const summary=await summarize(trial,getKey());s.lastTrial={source,...result,summary,createdAt:new Date().toISOString()};await saveSession(s);return s.lastTrial;
   }
  }finally{busy.delete(id);}

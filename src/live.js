@@ -1,7 +1,7 @@
 import {transcriptionConfig,language,setSessionLanguage} from './languages.js';
 import {authHeaders} from './access.js';
 import {Buffer} from 'buffer';
-import {getSession,saveSession} from './storage.js';
+import {getSession,saveSession,getMajorPreference} from './storage.js';
 import {AudioTurns,translateSegment} from './core.js';
 import {busy,getKey,complete} from './local-api.js';
 export class BrowserLive{
@@ -18,7 +18,7 @@ export class BrowserLive{
  async command(e){
   if(e.type==='start'){
    if(this.session)return;getKey();if(busy.has(e.id))throw new Error('当前课堂正在处理，请稍候');
-   this.session=await getSession(e.id);busy.add(e.id);this.session.summary='';this.started=Date.now();this.base=(this.session.segments.at(-1)?.offset||0)+1000;await this.connect();
+   this.session=await getSession(e.id);this.session.major=await getMajorPreference();busy.add(e.id);this.session.summary='';this.started=Date.now();this.base=(this.session.segments.at(-1)?.offset||0)+1000;await this.connect();
   }
   if(e.type==='pause'){this.paused=true;this.turns?.flush();this.session.status='paused';await this.persist();this.emit({type:'paused'});}
   if(e.type==='resume'){

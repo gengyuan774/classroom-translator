@@ -13,7 +13,7 @@ function runtime(){
  const objects=new Map(),BUCKET={async put(key,value){objects.set(key,value);},async get(key){return objects.has(key)?{async json(){return JSON.parse(objects.get(key));}}:null;},async delete(key){objects.delete(key);}};
  return {sql,objects,env:{DB,BUCKET}};
 }
-const session=(id=crypto.randomUUID())=>({id,title:'测试课堂',sourceLanguage:'ja',createdAt:new Date().toISOString(),status:'completed',segments:[{id:'s1',offset:0,source:'English',translation:'中文'}],materials:[],warnings:[],summary:'课堂总结'});
+const session=(id=crypto.randomUUID())=>({id,title:'测试课堂',sourceLanguage:'ja',major:{code:'medicine',custom:''},createdAt:new Date().toISOString(),status:'completed',segments:[{id:'s1',offset:0,source:'English',translation:'中文'}],materials:[],warnings:[],summary:'课堂总结'});
 const user=(env,subject)=>createVerifiedAccountSession(env,{provider:'email',subject,label:subject});
 function request(path,who,method='GET',body,extra={}){return new Request('https://example.test'+path,{method,headers:{Cookie:who?.cookie.split(';')[0]||'',Origin:'https://example.test','Content-Type':'application/json',...extra},body:body===undefined?undefined:JSON.stringify(body)});}
 const noProvider=()=>{throw new Error('No external provider may be called');};

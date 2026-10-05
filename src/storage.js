@@ -1,12 +1,15 @@
+import {normalizeMajor} from './majors.js';
 let account=null;
 const connections=new Map(),queues=new Map();
 const namespace=owner=>owner?'classroom-notes-account-'+owner:'classroom-notes';
-function database(owner){const name=namespace(owner);if(!connections.has(name))connections.set(name,new Promise((resolve,reject)=>{const req=indexedDB.open(name,2);req.onupgradeneeded=()=>{for(const [store,keyPath] of [['sessions','id'],['materials','key'],['sync','id']])if(!req.result.objectStoreNames.contains(store))req.result.createObjectStore(store,{keyPath});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>{connections.delete(name);reject(new Error('无法打开浏览器存储，请检查隐私模式或存储权限'));};}));return connections.get(name);}
-async function transaction(owner,store,mode,operation){const db=await database(owner);return new Promise((resolve,reject)=>{const tx=db.transaction(store,mode),request=operation(tx.objectStore(store));let result;request.onsuccess=()=>result=request.result;tx.oncomplete=()=>resolve(result);tx.onerror=()=>reject(new Error('浏览器保存失败，存储空间可能不足，请先导出笔记'));tx.onabort=()=>reject(new Error('浏览器保存失败，请重试'));});}
+function database(owner,preferences=false){const name=namespace(owner)+(preferences?'-preferences':'');if(!connections.has(name))connections.set(name,new Promise((resolve,reject)=>{const req=indexedDB.open(name,preferences?1:2);req.onupgradeneeded=()=>{for(const [store,keyPath] of (preferences?[['preferences','id']]:[['sessions','id'],['materials','key'],['sync','id']]))if(!req.result.objectStoreNames.contains(store))req.result.createObjectStore(store,{keyPath});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>{connections.delete(name);reject(new Error('无法打开浏览器存储，请检查隐私模式或存储权限'));};}));return connections.get(name);}
+async function transaction(owner,store,mode,operation){const db=await database(owner,store==='preferences');return new Promise((resolve,reject)=>{const tx=db.transaction(store,mode),request=operation(tx.objectStore(store));let result;request.onsuccess=()=>result=request.result;tx.oncomplete=()=>resolve(result);tx.onerror=()=>reject(new Error('浏览器保存失败，存储空间可能不足，请先导出笔记'));tx.onabort=()=>reject(new Error('浏览器保存失败，请重试'));});}
 const cached=(owner,store,id)=>transaction(owner,store,'readonly',s=>s.get(id));
 const put=(owner,store,value)=>transaction(owner,store,'readwrite',s=>s.put(structuredClone(value)));
 export function setAccount(user){account=user?.id||null;}
 export function accountId(){return account;}
+export async function getMajorPreference(){return normalizeMajor((await cached(account,'preferences','major'))?.value);}
+export async function saveMajorPreference(value){const major=normalizeMajor(value);await put(account,'preferences',{id:'major',value:major});return major;}
 export function storageDescription(){return account?'课堂记录保存到账户':'课堂记录保存在当前浏览器';}
 function report(message){if(typeof window!=='undefined')window.dispatchEvent(new CustomEvent('history-save-warning',{detail:message}));}
 async function cloud(owner,path,{method='GET',body}={}){const response=await fetch('/api/history'+path,{method,credentials:'same-origin',headers:{'X-Account-ID':owner,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const data=await response.json();if(!response.ok)throw new Error(data.error?.message||'账户历史记录暂不可用');return data;}

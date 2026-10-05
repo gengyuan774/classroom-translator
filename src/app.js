@@ -1,6 +1,7 @@
+import {MAJORS,majorName} from './majors.js';
 import {openLocalMicrophone} from './microphone.js';
 import {LANGUAGES,language,direction} from './languages.js';
-import {setAccount,accountId,storageDescription} from './storage.js';
+import {setAccount,accountId,storageDescription,getMajorPreference,saveMajorPreference} from './storage.js';
 import {refreshAccess,login,logout} from './access.js';
 import {renderNotes} from '../public/format.js';
 import {localApi} from './local-api.js';
@@ -10,6 +11,7 @@ const $=id=>document.getElementById(id);
 let config, current=null, ws=null, stream=null, context=null, capture=null, muted=null, micSource=null, micLabel='', mode='idle', startedAt=0, elapsed=0, tick;
 let exportBusy=false, materialBusy=false, languageBusy=false, selectedLanguage='auto', profileUser=null, historyWarning='';
 $('source-language').innerHTML=LANGUAGES.map(l=>`<option value="${l.code}">${l.label} → 中文</option>`).join('');
+let majorBusy=false;
 let flushResolver, wakeLock, partials=new Map(), lastEnded=false;
 const escape=s=>String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const time=ms=>{const s=Math.max(0,Math.floor(ms/1000));return [Math.floor(s/3600),Math.floor(s/60)%60,s%60].map(x=>String(x).padStart(2,'0')).join(':');};
@@ -160,7 +162,7 @@ async function download(format){
  catch(error){$('export-status').textContent='下载失败：'+error.message+' 请重试，课堂记录已保留。';}
  finally{exportBusy=false;updateExportControls();}
 }
-function materialLocked(){return materialBusy||languageBusy||['recording','paused','connecting','finishing'].includes(mode);}
+function materialLocked(){return majorBusy||materialBusy||languageBusy||['recording','paused','connecting','finishing'].includes(mode);}
 function updateMaterialControls(){
  const locked=materialLocked();$('material-add').disabled=locked;$('try-open').disabled=locked||!!current?.demo;
  $('start').disabled=locked&&mode!=='recording'&&mode!=='paused';
@@ -250,6 +252,19 @@ $('retry-summary').onclick=async()=>{if(!current)return;if(!config.hasKey&&(!cur
 $('export-pdf').onclick=()=>download('pdf');$('export-md').onclick=()=>download('md');$('export-html').onclick=()=>download('html');
 window.addEventListener('beforeunload',e=>{if(materialBusy||languageBusy||['recording','paused','connecting','finishing'].includes(mode)){e.preventDefault();e.returnValue='';}});
 document.addEventListener('visibilitychange',async()=>{if(document.visibilityState==='visible'&&mode==='recording')try{wakeLock=await navigator.wakeLock?.request('screen');}catch{}});
+$('profile-major').innerHTML=MAJORS.map(m=>`<option value="${m.code}">${escape(m.label)}</option>`).join('');
+function updateMajorField(){const custom=$('profile-major').value==='custom';$('custom-major-field').hidden=!custom;$('custom-major').required=custom;}
+$('profile-major').onchange=()=>{updateMajorField();$('major-status').hidden=true;};
+async function loadMajorPreference(){
+ try{const major=await getMajorPreference();$('profile-major').value=major.code;$('custom-major').value=major.custom;updateMajorField();$('profile-major').disabled=false;$('major-save').disabled=false;}
+ catch(error){$('major-status').hidden=false;$('major-status').textContent='无法读取专业设置：'+error.message;}
+}
+$('major-form').onsubmit=async event=>{
+ event.preventDefault();if(materialLocked())return;majorBusy=true;$('major-save').disabled=true;$('profile-major').disabled=true;$('custom-major').disabled=true;
+ try{const major=await saveMajorPreference({code:$('profile-major').value,custom:$('custom-major').value});$('major-status').textContent='已保存：'+majorName(major)+'。之后的翻译和总结会使用此设置。';}
+ catch(error){$('major-status').textContent='保存失败：'+error.message;}
+ finally{majorBusy=false;$('major-save').disabled=false;$('profile-major').disabled=false;$('custom-major').disabled=false;$('major-status').hidden=false;}
+};
 function profileMessage(text){$('profile-error').textContent=text;$('profile-error').hidden=!text;}
 function renderProfileAccount(){
  $('profile-login').hidden=!!profileUser;$('profile-signed-in').hidden=!profileUser;$('profile-login-title').textContent=profileUser?'我的账户':'登录';
@@ -265,6 +280,7 @@ async function loadAccount(){
  catch(e){profileMessage(e.message);renderProfileAccount();}
 }
 function showClassroom(){
+ if(majorBusy)return;
  $('profile-page').hidden=true;$('classroom-workspace').hidden=false;$('demo').hidden=false;$('profile-open').removeAttribute('aria-current');
  $('breadcrumb-title').textContent=current?.title||'新的开始';if(location.pathname==='/profile')window.history.pushState({},'', '/');
 }
@@ -277,10 +293,11 @@ $('profile-open').onclick=$('mobile-profile').onclick=e=>{e.preventDefault();sho
 $('profile-history-list').onclick=e=>{const id=e.target.closest('[data-history-id]')?.dataset.historyId;if(id)openHistory(id);};
 function selectLoginTab(tab,focus=false){for(const kind of ['phone','email','wechat']){const active=kind===tab,button=$('login-'+kind+'-tab');button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;$('login-'+kind+'-panel').hidden=!active;if(active&&focus)button.focus();}}
 for(const button of document.querySelectorAll('[data-login-tab]')){button.onclick=()=>selectLoginTab(button.dataset.loginTab);button.onkeydown=e=>{const keys=['phone','email','wechat'],index=keys.indexOf(button.dataset.loginTab);if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();selectLoginTab(keys[(index+(e.key==='ArrowRight'?1:2))%3],true);}};}
-$('account-logout').onclick=async()=>{if(materialLocked())return;$('account-logout').disabled=true;try{const res=await fetch('/api/account/logout',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:'{}'});if(!res.ok)throw new Error('退出失败，请稍后重试。');profileUser=null;setAccount(null);historyWarning='';blank();renderProfileAccount();await history();showProfile();}catch(e){profileMessage(e.message);}finally{$('account-logout').disabled=false;}};
+$('account-logout').onclick=async()=>{if(materialLocked())return;$('account-logout').disabled=true;try{const res=await fetch('/api/account/logout',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:'{}'});if(!res.ok)throw new Error('退出失败，请稍后重试。');profileUser=null;setAccount(null);await loadMajorPreference();historyWarning='';blank();renderProfileAccount();await history();showProfile();}catch(e){profileMessage(e.message);}finally{$('account-logout').disabled=false;}};
 window.addEventListener('popstate',()=>{if(location.pathname==='/profile')showProfile(false);else showClassroom();});
 window.addEventListener('history-save-warning',e=>{historyWarning=e.detail;notice(e.detail);profileMessage(e.detail);if(current)render();});
 await loadAccount();
+await loadMajorPreference();
 try{config=await refreshAccess();renderAccess();$('setup-hint').hidden=config.hasKey;$('model-info').textContent=`实时转写：${config.transcriptionModel}　翻译 / 总结：${config.textModel}`;await history();renderMaterials();}catch(e){notice('无法打开浏览器存储：'+e.message);$('start').disabled=true;}
 
 if(location.pathname==='/profile')showProfile(false);
