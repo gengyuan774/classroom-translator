@@ -1,3 +1,4 @@
+import {openLocalMicrophone} from './microphone.js';
 import {LANGUAGES,language,direction} from './languages.js';
 import {setAccount,accountId,storageDescription} from './storage.js';
 import {refreshAccess,login,logout} from './access.js';
@@ -6,7 +7,7 @@ import {localApi} from './local-api.js';
 import {downloadNotes} from './download.js';
 import {BrowserLive} from './live.js';
 const $=id=>document.getElementById(id);
-let config, current=null, ws=null, stream=null, context=null, capture=null, muted=null, mode='idle', startedAt=0, elapsed=0, tick;
+let config, current=null, ws=null, stream=null, context=null, capture=null, muted=null, micSource=null, micLabel='', mode='idle', startedAt=0, elapsed=0, tick;
 let exportBusy=false, materialBusy=false, languageBusy=false, selectedLanguage='auto', profileUser=null, historyWarning='';
 $('source-language').innerHTML=LANGUAGES.map(l=>`<option value="${l.code}">${l.label} → 中文</option>`).join('');
 let flushResolver, wakeLock, partials=new Map(), lastEnded=false;
@@ -21,7 +22,7 @@ function controls(next){
  $('new-class').disabled=busy||live||materialBusy||languageBusy;$('demo').disabled=busy||live||materialBusy||languageBusy;$('title').disabled=busy||live||!!current;
  $('status-dot').classList.toggle('live',recording);document.querySelector('.meter').classList.toggle('live',recording);
  $('status').textContent=({idle:'准备就绪',connecting:'连接中',recording:'正在听课',paused:'已暂停',finishing:'正在整理课堂',ended:'课堂已结束'})[mode];
- $('status-detail').textContent=recording?'麦克风已开启 · '+direction(selectedLanguage):mode==='paused'?'点击继续录音，接着记录课堂':mode==='finishing'?'请保持页面打开，笔记正在生成':'使用电脑麦克风 · '+direction(selectedLanguage);
+ $('status-detail').textContent=recording?(micLabel||'本机麦克风')+' · '+direction(selectedLanguage):mode==='paused'?'点击继续录音，接着记录课堂':mode==='finishing'?'请保持页面打开，笔记正在生成':'优先使用本机麦克风 · '+direction(selectedLanguage);
  $('retry-summary').disabled=busy||live||materialBusy||languageBusy;updateMaterialControls();updateLanguageUI();
 }
 function updateLanguageUI(){
@@ -57,7 +58,7 @@ async function history(){
 }
 function blank(){if(materialBusy||languageBusy)return;showClassroom();current=null;selectedLanguage='auto';renderMaterials();partials.clear();$('transcript').innerHTML=initialEmpty;$('title').value='';$('breadcrumb-title').textContent='新的开始';$('segment-count').textContent='0 段';$('summary').hidden=true;$('summary-empty').hidden=false;$('summary-badge').textContent='待生成';updateExportControls();$('retry-summary').hidden=true;$('timer').textContent='00:00:00';$('partial').hidden=true;$('save-state').textContent=storageDescription();elapsed=0;notice('');controls('idle');history().catch(e=>notice(e.message));}
 async function releaseAudio(){
- stream?.getTracks().forEach(t=>t.stop());stream=null;
+ stream?.getTracks().forEach(t=>t.stop());stream=null;micLabel='';micSource?.disconnect();micSource=null;
  capture?.disconnect();muted?.disconnect();capture=null;muted=null;
  if(context && context.state!=='closed')await context.close();context=null;
  clearInterval(tick);await wakeLock?.release().catch(()=>{});wakeLock=null;
@@ -68,16 +69,23 @@ async function flush(){
  if(!capture || context?.state!=='running')return;
  await new Promise(resolve=>{const timer=setTimeout(()=>{flushResolver=null;resolve();},1500);flushResolver=()=>{clearTimeout(timer);resolve();};capture.port.postMessage('flush');});
 }
+async function acquireMicrophone(){
+ const next=await openLocalMicrophone();stream?.getTracks().forEach(t=>t.stop());stream=next;micLabel=stream.getAudioTracks()[0]?.label||'本机麦克风';
+ stream.getAudioTracks()[0].onended=async()=>{
+  if(mode==='recording')await pauseRecording();
+  if(['recording','paused','connecting'].includes(mode))notice('本机麦克风已断开，点击继续录音可重新连接。');
+ };
+}
 async function begin(){
  if(!config.hasKey){$('settings').showModal();return;}
  notice('');lastEnded=false;controls('connecting');
  try{
-   stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+   await acquireMicrophone();
    context=new AudioContext({sampleRate:24000});await context.resume();
    if(context.sampleRate!==24000)throw new Error('当前浏览器不支持所需的音频采样率，请使用 Chrome。');
    await context.audioWorklet.addModule('/pcm-worklet.js');
    capture=new AudioWorkletNode(context,'pcm-capture');muted=context.createGain();muted.gain.value=0;
-   context.createMediaStreamSource(stream).connect(capture);capture.connect(muted).connect(context.destination);
+   micSource=context.createMediaStreamSource(stream);micSource.connect(capture);capture.connect(muted).connect(context.destination);
    capture.port.onmessage=({data})=>{
      if(data.flushed){flushResolver?.();flushResolver=null;return;}
      if(data.audio && ws?.readyState===WebSocket.OPEN && mode==='recording'){
@@ -94,6 +102,7 @@ async function begin(){
    ws.onmessage=async({data})=>{
      const e=JSON.parse(data);
      if(e.type==='ready'){
+       if(!stream?.getAudioTracks().some(t=>t.readyState==='live')){send({type:'pause'});controls('paused');notice('本机麦克风已断开，点击继续录音可重新连接。');return;}
        capture?.port.postMessage('resume');stream?.getAudioTracks().forEach(t=>t.enabled=true);controls('recording');startedAt=Date.now();clearInterval(tick);tick=setInterval(()=>{$('timer').textContent=time(elapsed+Date.now()-startedAt);},1000);
        try{wakeLock=await navigator.wakeLock?.request('screen');}catch{}
      }
@@ -129,7 +138,9 @@ async function pauseRecording(){
  if(mode==='recording'){
    $('pause').disabled=true;await flush();$('pause').disabled=false;send({type:'pause'});elapsed+=Date.now()-startedAt;clearInterval(tick);stream?.getAudioTracks().forEach(t=>t.enabled=false);controls('paused');
  }else if(mode==='paused'){
-   notice('');if(ws?.readyState===WebSocket.OPEN){controls('connecting');send({type:'resume'});}else await begin();
+   notice('');if(ws?.readyState===WebSocket.OPEN){
+    controls('connecting');try{if(!stream?.getAudioTracks().some(t=>t.readyState==='live')){await acquireMicrophone();micSource?.disconnect();micSource=context.createMediaStreamSource(stream);micSource.connect(capture);}send({type:'resume'});}catch(error){controls('paused');notice(error.message);}
+   }else await begin();
  }
 }
 async function finish(){
