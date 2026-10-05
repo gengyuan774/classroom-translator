@@ -1,5 +1,5 @@
 import {saveSession,getSession,listSessions,saveMaterial,getMaterial,removeMaterial} from './storage.js';
-import {summarize,translateSegment,exportHtml,exportMarkdown} from './core.js';
+import {summarize,translateSegment} from './core.js';
 import {getKey,accessConfig,setOwnKey} from './access.js';
 import {validLanguage,setSessionLanguage} from './languages.js';
 export {getKey} from './access.js';
@@ -57,4 +57,3 @@ export async function localApi(route,options={}){
   }
  }finally{busy.delete(id);}
 }
-export function downloadNotes(s,format){const text=format==='html'?exportHtml(s):exportMarkdown(s);const url=URL.createObjectURL(new Blob([text],{type:format==='html'?'text/html;charset=utf-8':'text/markdown;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=s.title+'.'+format;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);}

@@ -17,7 +17,7 @@ export async function handle(request,upstream=fetch,env={}){
  const url=new URL(request.url);
  if(!url.pathname.startsWith('/api/')){
   const asset=assets[url.pathname==='/profile'?'/':url.pathname];if(!asset)return new Response('Not found',{status:404});if(request.method!=='GET'&&request.method!=='HEAD')return new Response('Method not allowed',{status:405});
-  return new Response(request.method==='HEAD'?null:asset.text,{headers:{'Content-Type':asset.type,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Permissions-Policy':'microphone=(self)', 'Content-Security-Policy':"default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self'; img-src 'self' data:; connect-src 'self' wss://api.openai.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"}});
+  return new Response(request.method==='HEAD'?null:asset.base64?Uint8Array.from(atob(asset.base64),c=>c.charCodeAt(0)):asset.text,{headers:{'Content-Type':asset.type,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Permissions-Policy':'microphone=(self)', 'Content-Security-Policy':"default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self'; img-src 'self' data:; connect-src 'self' wss://api.openai.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"}});
  }
  if(request.headers.get('Origin')&&request.headers.get('Origin')!==url.origin)return reply({error:{message:'不允许跨站请求'}},403);
  if(request.headers.get('Sec-Fetch-Site')==='cross-site')return reply({error:{message:'不允许跨站请求'}},403);

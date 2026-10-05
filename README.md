@@ -1,6 +1,6 @@
 # 课堂译记 · 公开版
 
-多语言课堂实时转写、中文翻译、PPTX/PDF/DOCX/TXT/Markdown 参考资料、课后总结与 HTML/Markdown 导出。
+多语言课堂实时转写、中文翻译、PPTX/PDF/DOCX/TXT/Markdown 参考资料、课后总结与 PDF/HTML/Markdown 导出。
 
 支持会员码和个人 API Key 两种连接方式。会员码由服务器验证，通过 HttpOnly、Secure、SameSite=Strict 的 7 天会话 Cookie 授权。会员共享 API Key 只保存在服务器环境中。个人 API Key 只在当前页面内存中保存，通过同源服务转发给固定的 OpenAI 接口。实时音频使用临时凭据直接连接 OpenAI。课堂和资料文字保存在当前浏览器的 IndexedDB，清除浏览器数据会丢失记录，请及时导出。无跨设备同步。
 
@@ -27,3 +27,9 @@
 已准备账户会话及云端历史接口：账户身份仅来自服务器验证的会话 Cookie，所有课堂和资料读写均校验归属。账号的浏览器副本分开保存；保存云端失败会保留本地副本并提示。并发修改通过版本号防止旧页面覆盖新记录。不会把未登录时的浏览器记录自动归到任意新登录账号。
 
 后续接入真实登录提供方时，应在服务端验证手机号／邮箱所有权或微信授权后，才能调用 `createVerifiedAccountSession`；不能直接接收客户端自报的身份创建会话。当前没有公开接口签发账户会话，`/api/account/login/*` 明确返回未接入。接入时再启用对应表单和发送、验证流程。账户历史隔离、重新登录读取、失败保存及原有数据库升级已使用模拟身份完成测试。
+
+## 笔记下载
+
+“下载 PDF”直接生成 A4 PDF，总结后自动下载也使用 PDF。中文字体随网站提供并嵌入导出文件；常见中英文文字可选择和复制，字体未覆盖的字符在浏览器中绘制保留。长笔记自动分页，包含总结、参考资料、记录提示和双语记录。生成在浏览器内完成，不将笔记发送给额外服务，不调用 API。原 HTML/Markdown 导出保留明确格式标签；文件名会清理不兼容字符。下载后的默认打开软件由操作系统决定，网站不自动启动外部应用。
+
+PDF 字体：Android 开源项目 Droid Sans Fallback（Apache 2.0）；原始许可见 `public/export-font-LICENSE.txt`，来源为 Android `platform/frameworks/base` 的 `android10-release/data/fonts/DroidSansFallback.ttf`。

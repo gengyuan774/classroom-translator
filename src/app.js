@@ -2,11 +2,12 @@ import {LANGUAGES,language,direction} from './languages.js';
 import {setAccount,accountId,storageDescription} from './storage.js';
 import {refreshAccess,login,logout} from './access.js';
 import {renderNotes} from '../public/format.js';
-import {localApi,downloadNotes} from './local-api.js';
+import {localApi} from './local-api.js';
+import {downloadNotes} from './download.js';
 import {BrowserLive} from './live.js';
 const $=id=>document.getElementById(id);
 let config, current=null, ws=null, stream=null, context=null, capture=null, muted=null, mode='idle', startedAt=0, elapsed=0, tick;
-let materialBusy=false, languageBusy=false, selectedLanguage='auto', profileUser=null, historyWarning='';
+let exportBusy=false, materialBusy=false, languageBusy=false, selectedLanguage='auto', profileUser=null, historyWarning='';
 $('source-language').innerHTML=LANGUAGES.map(l=>`<option value="${l.code}">${l.label} → 中文</option>`).join('');
 let flushResolver, wakeLock, partials=new Map(), lastEnded=false;
 const escape=s=>String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -45,7 +46,7 @@ function render(){
  if($('autoscroll').checked && nearBottom)container.scrollTop=container.scrollHeight;
  $('summary').hidden=!current.summary;$('summary-empty').hidden=!!current.summary;$('summary').innerHTML=renderNotes(current.summary);
  $('summary-badge').textContent=current.demo?'示例笔记':current.summary?'已生成':current.status==='summary_failed'?'需重试':current.status==='summarizing'?'生成中':'待生成';
- $('export-md').disabled=!current.segments.length&&!current.summary;$('export-html').disabled=$('export-md').disabled;
+ updateExportControls();
  $('retry-summary').hidden=(!current.segments.some(s=>s.source)&&!current.materials?.some(m=>m.enabled!==false))||['recording','connecting','finishing'].includes(mode);$('retry-summary').textContent=current.segments.some(s=>s.source)?'重新生成总结':'生成资料预习总结';renderMaterials();if(current.summaryStale)$('summary-badge').textContent='资料已更新 · 待重新总结';
  $('save-state').textContent=current.demo?'演示数据 · 不调用 API':(historyWarning?'已保存在此设备 · 账户同步待完成':accountId()?'已保存到账户':'已保存在当前浏览器');
  const warnings=current.warnings || [];if(warnings.length)notice(warnings.at(-1));
@@ -54,7 +55,7 @@ async function history(){
  const list=await api('/api/sessions');renderProfileHistory(list);$('history-count').textContent=list.length;$('history-select').innerHTML='<option value="">历史课堂</option>'+list.map(s=>`<option value="${s.id}">${escape(s.title)}</option>`).join('');
  $('history').innerHTML=list.length?list.map(s=>`<button class="history-item ${s.id===current?.id?'active':''}" data-id="${s.id}"><strong>${s.demo?'◌':'▤'} ${escape(s.title)}</strong><small>${new Date(s.createdAt).toLocaleDateString('zh-CN')} · ${s.count} 段${s.demo?' · 示例':''}</small></button>`).join(''):'<div class="history-empty">每一节课，都值得留下。<br>你的课堂记录会出现在这里。</div>';
 }
-function blank(){if(materialBusy||languageBusy)return;showClassroom();current=null;selectedLanguage='auto';renderMaterials();partials.clear();$('transcript').innerHTML=initialEmpty;$('title').value='';$('breadcrumb-title').textContent='新的开始';$('segment-count').textContent='0 段';$('summary').hidden=true;$('summary-empty').hidden=false;$('summary-badge').textContent='待生成';$('export-md').disabled=true;$('export-html').disabled=true;$('retry-summary').hidden=true;$('timer').textContent='00:00:00';$('partial').hidden=true;$('save-state').textContent=storageDescription();elapsed=0;notice('');controls('idle');history().catch(e=>notice(e.message));}
+function blank(){if(materialBusy||languageBusy)return;showClassroom();current=null;selectedLanguage='auto';renderMaterials();partials.clear();$('transcript').innerHTML=initialEmpty;$('title').value='';$('breadcrumb-title').textContent='新的开始';$('segment-count').textContent='0 段';$('summary').hidden=true;$('summary-empty').hidden=false;$('summary-badge').textContent='待生成';updateExportControls();$('retry-summary').hidden=true;$('timer').textContent='00:00:00';$('partial').hidden=true;$('save-state').textContent=storageDescription();elapsed=0;notice('');controls('idle');history().catch(e=>notice(e.message));}
 async function releaseAudio(){
  stream?.getTracks().forEach(t=>t.stop());stream=null;
  capture?.disconnect();muted?.disconnect();capture=null;muted=null;
@@ -110,8 +111,7 @@ async function begin(){
      }
      if(e.type==='finished'){
        lastEnded=true;current=e.session;await releaseAudio();partials.clear();renderPartial();controls('ended');render();await history();
-       if(current.summary && $('auto-export').checked)download('md');
-       if(current.summary)notice('课堂已整理完成，'+(accountId()?'笔记已保存到账户。':'笔记已保存在当前浏览器。')+($('auto-export').checked?' 已发起下载；如未看到文件，可点击下方导出按钮。':''));
+       if(current.summary){notice('课堂已整理完成，'+(accountId()?'笔记已保存到账户。':'笔记已保存在当前浏览器。'));if($('auto-export').checked)await download('pdf');}
      }
    };
    ws.onerror=()=>notice('连接失败，请检查网络后重试。');
@@ -137,7 +137,18 @@ async function finish(){
  $('finish').disabled=true;$('pause').disabled=true;if(mode==='recording'){await flush();elapsed+=Date.now()-startedAt;}$('pause').disabled=false;
  controls('finishing');await releaseAudio();send({type:'finish'});
 }
-function download(format){if(current)downloadNotes(current,format);}
+function updateExportControls(){
+ const empty=!current||(!current.segments.length&&!current.summary);
+ for(const id of ['export-pdf','export-md','export-html'])$(id).disabled=exportBusy||empty;
+ $('export-pdf').textContent=exportBusy?'正在准备文件…':'下载 PDF';
+}
+async function download(format){
+ if(!current||exportBusy)return;
+ exportBusy=true;updateExportControls();$('export-status').hidden=false;$('export-status').textContent=format==='pdf'?'正在生成 PDF…':'正在准备下载…';
+ try{await downloadNotes(structuredClone(current),format);$('export-status').textContent=format==='pdf'?'已发起 PDF 下载，可在下载文件夹中用 WPS 或预览打开。':'已发起下载，请查看浏览器的下载列表。';}
+ catch(error){$('export-status').textContent='下载失败：'+error.message+' 请重试，课堂记录已保留。';}
+ finally{exportBusy=false;updateExportControls();}
+}
 function materialLocked(){return materialBusy||languageBusy||['recording','paused','connecting','finishing'].includes(mode);}
 function updateMaterialControls(){
  const locked=materialLocked();$('material-add').disabled=locked;$('try-open').disabled=locked||!!current?.demo;
@@ -224,8 +235,8 @@ $('demo').onclick=async()=>{try{current=await api('/api/sessions',{method:'POST'
 async function openHistory(id){if(!id)return;if(materialBusy||languageBusy||['recording','paused','connecting','finishing'].includes(mode)){notice('请先完成当前操作或结束课堂，再打开其他记录。');return;}try{showClassroom();current=await api('/api/sessions/'+id);selectedLanguage=language(current.sourceLanguage).code;$('transcript').innerHTML=initialEmpty;controls(current.status==='ready'?'idle':'ended');elapsed=0;notice('');render();if(current.demo)$('start').hidden=true;await history();}catch(e){notice(e.message);}};
 $('history').onclick=e=>openHistory(e.target.closest('[data-id]')?.dataset.id);
 $('history-select').onchange=e=>openHistory(e.target.value);
-$('retry-summary').onclick=async()=>{if(!current)return;if(!config.hasKey&&(!current.demo||current.materials?.length)){$('settings').showModal();return;}controls('finishing');notice('正在重新整理课堂笔记…');try{current=await api(`/api/sessions/${current.id}/summary`,{method:'POST'});controls('ended');render();if(current.demo)$('start').hidden=true;if($('auto-export').checked)download('md');notice('总结已生成，'+(accountId()?'完整笔记已保存到账户。':'完整笔记已保存在当前浏览器。'));}catch(e){controls('ended');notice(e.message);render();}};
-$('export-md').onclick=()=>download('md');$('export-html').onclick=()=>download('html');
+$('retry-summary').onclick=async()=>{if(!current)return;if(!config.hasKey&&(!current.demo||current.materials?.length)){$('settings').showModal();return;}controls('finishing');notice('正在重新整理课堂笔记…');try{current=await api(`/api/sessions/${current.id}/summary`,{method:'POST'});controls('ended');render();if(current.demo)$('start').hidden=true;notice('总结已生成，'+(accountId()?'完整笔记已保存到账户。':'完整笔记已保存在当前浏览器。'));if($('auto-export').checked)await download('pdf');}catch(e){controls('ended');notice(e.message);render();}};
+$('export-pdf').onclick=()=>download('pdf');$('export-md').onclick=()=>download('md');$('export-html').onclick=()=>download('html');
 window.addEventListener('beforeunload',e=>{if(materialBusy||languageBusy||['recording','paused','connecting','finishing'].includes(mode)){e.preventDefault();e.returnValue='';}});
 document.addEventListener('visibilitychange',async()=>{if(document.visibilityState==='visible'&&mode==='recording')try{wakeLock=await navigator.wakeLock?.request('screen');}catch{}});
 function profileMessage(text){$('profile-error').textContent=text;$('profile-error').hidden=!text;}
