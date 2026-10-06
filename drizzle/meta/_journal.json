@@ -15,6 +15,13 @@
       "when": 1790931593538,
       "tag": "0001_melted_sabra",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791275671618,
+      "tag": "0002_outstanding_outlaw_kid",
+      "breakpoints": true
     }
   ]
 }

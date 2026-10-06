@@ -1,6 +1,7 @@
 import assets from './generated-assets.js';
-import {MemberError,memberSession,sharedReady,loginMember,logoutMember,allowSharedRequest} from './member.js';
+import {MemberError,membershipFor,memberSession,sharedReady,loginMember,allowSharedRequest} from './member.js';
 import {accountUser,requireAccount,signOutAccount} from './account-server.js';
+import {phoneReady,sendPhoneCode,verifyPhoneCode} from './phone-server.js';
 import {historyRoute} from './history-server.js';
 import {transcriptionConfig,validLanguage} from './languages.js';
 const reply=(data,status=200,headers={})=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers}});
@@ -22,7 +23,9 @@ export async function handle(request,upstream=fetch,env={}){
  if(request.headers.get('Origin')&&request.headers.get('Origin')!==url.origin)return reply({error:{message:'不允许跨站请求'}},403);
  if(request.headers.get('Sec-Fetch-Site')==='cross-site')return reply({error:{message:'不允许跨站请求'}},403);
  try{
-  if(url.pathname==='/api/account'&&request.method==='GET')return reply({user:await accountUser(request,env),methods:{phone:false,email:false,wechat:false}});
+  if(url.pathname==='/api/account'&&request.method==='GET'){const user=await accountUser(request,env);if(user)user.membership=await membershipFor(env,user.id);return reply({user,methods:{phone:phoneReady(env),email:false,wechat:false}});}
+  if(url.pathname==='/api/account/phone/send'&&request.method==='POST')return reply(await sendPhoneCode(request,env,await readJson(request,4096),upstream));
+  if(url.pathname==='/api/account/login/phone'&&request.method==='POST'){const result=await verifyPhoneCode(request,env,await readJson(request,4096),upstream);result.user.membership=await membershipFor(env,result.user.id);return reply({user:result.user},200,{'Set-Cookie':result.cookie});}
   if(url.pathname==='/api/account/logout'&&request.method==='POST'){
    await readJson(request,4096);return reply({ok:true},200,{'Set-Cookie':await signOutAccount(request,env)});
   }
@@ -35,10 +38,10 @@ export async function handle(request,upstream=fetch,env={}){
   }
   if(url.pathname==='/api/member/status'&&request.method==='GET')return reply({member:!!await memberSession(request,env),sharedReady:sharedReady(env)});
   if(url.pathname==='/api/member/login'&&request.method==='POST'){
-   const data=await readJson(request,4096);const cookie=await loginMember(request,env,data.code);return reply({member:true,sharedReady:sharedReady(env)},200,{'Set-Cookie':cookie});
+   const data=await readJson(request,4096);const membership=await loginMember(request,env,data.code);return reply({member:membership.active,membership,sharedReady:sharedReady(env)});
   }
   if(url.pathname==='/api/member/logout'&&request.method==='POST'){
-   await readJson(request,4096);return reply({member:false,sharedReady:sharedReady(env)},200,{'Set-Cookie':await logoutMember(request,env)});
+   await readJson(request,4096);return reply({member:false,sharedReady:sharedReady(env)},200,{'Set-Cookie':await signOutAccount(request,env)});
   }
   if(!['/api/openai/responses','/api/openai/token'].includes(url.pathname))return reply({error:{message:'Not found'}},404);
   if(request.method!=='POST')return reply({error:{message:'Method not allowed'}},405);

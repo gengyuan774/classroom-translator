@@ -24,3 +24,5 @@
 .history-actions button[aria-pressed=true]{color:#8e6905;font-weight:600}
 .history-actions .history-delete{color:#a46652}
 .history-actions button:hover{background:#ffffff90}
+
+.profile-membership{border-top:1px solid var(--line);padding-top:24px;margin-top:12px}.membership-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.membership-heading h2{margin:0}.profile-membership p{font-size:14px;line-height:1.8;color:#718267}.profile-membership small{display:block;margin-top:12px;font-size:13px;color:#839078;line-height:1.7}#redeem-status{color:#36543e}#membership-tier{white-space:nowrap}#phone-service-status:empty{display:none}

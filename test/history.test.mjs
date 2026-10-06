@@ -2,13 +2,13 @@ import 'fake-indexeddb/auto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
-import {readFileSync} from 'node:fs';
+import {readFileSync,readdirSync} from 'node:fs';
 import {handle} from '../src/worker.js';
 import {createVerifiedAccountSession} from '../src/account-server.js';
 import {setAccount,saveSession,getSession,listSessions,saveMaterial,getMaterial,setSessionPinned,deleteSession} from '../src/storage.js';
 function runtime(){
  const sql=new DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
- for(const file of ['0000_small_gwen_stacy.sql','0001_melted_sabra.sql'])sql.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
+ for(const file of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort())sql.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
  const DB={prepare(query){return {bind(...args){const st=sql.prepare(query);return {async first(){return st.get(...args)||null;},async all(){return {results:st.all(...args)};},async run(){return st.run(...args);}};}};},async batch(items){for(const item of items)await item.run();}};
  const objects=new Map(),BUCKET={async put(key,value){objects.set(key,value);},async get(key){return objects.has(key)?{async json(){return JSON.parse(objects.get(key));}}:null;},async delete(key){objects.delete(key);}};
  return {sql,objects,env:{DB,BUCKET}};
