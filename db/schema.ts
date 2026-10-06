@@ -27,3 +27,7 @@ export const memberRedemptions=sqliteTable('member_redemptions',{
 export const phoneChallenges=sqliteTable('phone_challenges',{
  id:text('id').primaryKey(),phoneE164:text('phone_e164').notNull(),verificationSid:text('verification_sid').notNull(),attempts:integer('attempts').notNull(),expiresAt:integer('expires_at').notNull()
 },t=>[index('phone_challenges_expiry').on(t.expiresAt)]);
+
+export const accountPasswords=sqliteTable('account_passwords',{
+ username:text('username').primaryKey(),accountId:text('account_id').notNull().references(()=>accounts.id),passwordHash:text('password_hash').notNull(),createdAt:integer('created_at').notNull()
+},t=>[uniqueIndex('account_passwords_account').on(t.accountId)]);

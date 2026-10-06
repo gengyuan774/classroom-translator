@@ -2,6 +2,7 @@ import assets from './generated-assets.js';
 import {MemberError,membershipFor,memberSession,sharedReady,loginMember,allowSharedRequest} from './member.js';
 import {accountUser,requireAccount,signOutAccount} from './account-server.js';
 import {phoneReady,sendPhoneCode,verifyPhoneCode} from './phone-server.js';
+import {passwordAccount} from './password-server.js';
 import {historyRoute} from './history-server.js';
 import {transcriptionConfig,validLanguage} from './languages.js';
 const reply=(data,status=200,headers={})=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers}});
@@ -23,7 +24,8 @@ export async function handle(request,upstream=fetch,env={}){
  if(request.headers.get('Origin')&&request.headers.get('Origin')!==url.origin)return reply({error:{message:'不允许跨站请求'}},403);
  if(request.headers.get('Sec-Fetch-Site')==='cross-site')return reply({error:{message:'不允许跨站请求'}},403);
  try{
-  if(url.pathname==='/api/account'&&request.method==='GET'){const user=await accountUser(request,env);if(user)user.membership=await membershipFor(env,user.id);return reply({user,methods:{phone:phoneReady(env),email:false,wechat:false}});}
+  if(url.pathname==='/api/account'&&request.method==='GET'){const user=await accountUser(request,env);if(user)user.membership=await membershipFor(env,user.id);return reply({user,methods:{password:!!env.DB,phone:phoneReady(env),email:false,wechat:false}});}
+  if(['/api/account/register/password','/api/account/login/password'].includes(url.pathname)&&request.method==='POST'){const result=await passwordAccount(request,env,await readJson(request,4096),url.pathname.includes('/register/'));result.user.membership=await membershipFor(env,result.user.id);return reply({user:result.user},200,{'Set-Cookie':result.cookie});}
   if(url.pathname==='/api/account/phone/send'&&request.method==='POST')return reply(await sendPhoneCode(request,env,await readJson(request,4096),upstream));
   if(url.pathname==='/api/account/login/phone'&&request.method==='POST'){const result=await verifyPhoneCode(request,env,await readJson(request,4096),upstream);result.user.membership=await membershipFor(env,result.user.id);return reply({user:result.user},200,{'Set-Cookie':result.cookie});}
   if(url.pathname==='/api/account/logout'&&request.method==='POST'){

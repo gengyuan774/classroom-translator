@@ -18,7 +18,7 @@ const user=(env,subject)=>createVerifiedAccountSession(env,{provider:'email',sub
 function request(path,who,method='GET',body,extra={}){return new Request('https://example.test'+path,{method,headers:{Cookie:who?.cookie.split(';')[0]||'',Origin:'https://example.test','Content-Type':'application/json',...extra},body:body===undefined?undefined:JSON.stringify(body)});}
 const noProvider=()=>{throw new Error('No external provider may be called');};
 test('login stays unavailable and forged client identity cannot read history',async()=>{
- const {env}=runtime();assert.deepEqual(await (await handle(request('/api/account'),noProvider,env)).json(),{user:null,methods:{phone:false,email:false,wechat:false}});
+ const {env}=runtime();assert.deepEqual(await (await handle(request('/api/account'),noProvider,env)).json(),{user:null,methods:{password:true,phone:false,email:false,wechat:false}});
  for(const kind of ['phone','email','wechat'])assert.equal((await handle(request('/api/account/login/'+kind,null,'POST',{}),noProvider,env)).status,503);
  assert.equal((await handle(request('/api/history',null,'GET',undefined,{'X-Account-ID':'fake','oai-authenticated-user-id':'fake'}),noProvider,env)).status,401);
 });

@@ -11,7 +11,7 @@ const $=id=>document.getElementById(id);
 let config, current=null, ws=null, stream=null, context=null, capture=null, muted=null, micSource=null, micLabel='', mode='idle', startedAt=0, elapsed=0, tick;
 let exportBusy=false, materialBusy=false, languageBusy=false, selectedLanguage='auto', profileUser=null, historyWarning='';
 $('source-language').innerHTML=LANGUAGES.map(l=>`<option value="${l.code}">${l.label} → 中文</option>`).join('');
-let majorBusy=false,accountBusy=false,phoneEnabled=false,phoneChallenge='',phoneRetryAt=0;
+let majorBusy=false,accountBusy=false,passwordEnabled=false,passwordRegister=false,phoneEnabled=false,phoneChallenge='',phoneRetryAt=0;
 let phoneTimer;
 let flushResolver, wakeLock, partials=new Map(), lastEnded=false;
 const escape=s=>String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -297,7 +297,7 @@ function renderProfileHistory(list){
  $('profile-history-list').innerHTML=list.length?list.map(s=>`<button class="profile-history-item" data-history-id="${s.id}"><strong>${escape(s.title)}</strong><small>${escape(new Date(s.createdAt).toLocaleDateString('zh-CN'))} · ${s.count} 段${s.demo?' · 示例':''}</small></button>`).join(''):'<div class="profile-history-empty">还没有课堂记录</div>';
 }
 async function loadAccount(){
- try{const response=await fetch('/api/account',{credentials:'same-origin'});if(!response.ok)throw new Error('暂时无法读取账户状态，请稍后刷新重试。');const data=await response.json();applyAccount(data.user);phoneEnabled=data.methods?.phone===true;renderProfileAccount();}
+ try{const response=await fetch('/api/account',{credentials:'same-origin'});if(!response.ok)throw new Error('暂时无法读取账户状态，请稍后刷新重试。');const data=await response.json();applyAccount(data.user);phoneEnabled=data.methods?.phone===true;passwordEnabled=data.methods?.password===true;renderProfileAccount();}
  catch(e){profileMessage(e.message);renderProfileAccount();}
 }
 function showClassroom(){
@@ -312,8 +312,8 @@ function showProfile(push=true){
 }
 $('profile-open').onclick=$('mobile-profile').onclick=e=>{e.preventDefault();showProfile();};$('profile-back').onclick=showClassroom;
 $('profile-history-list').onclick=e=>{const id=e.target.closest('[data-history-id]')?.dataset.historyId;if(id)openHistory(id);};
-function selectLoginTab(tab,focus=false){for(const kind of ['phone','email','wechat']){const active=kind===tab,button=$('login-'+kind+'-tab');button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;$('login-'+kind+'-panel').hidden=!active;if(active&&focus)button.focus();}}
-for(const button of document.querySelectorAll('[data-login-tab]')){button.onclick=()=>selectLoginTab(button.dataset.loginTab);button.onkeydown=e=>{const keys=['phone','email','wechat'],index=keys.indexOf(button.dataset.loginTab);if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();selectLoginTab(keys[(index+(e.key==='ArrowRight'?1:2))%3],true);}};}
+function selectLoginTab(tab,focus=false){if(accountBusy)return;for(const kind of ['password','phone','email','wechat']){const active=kind===tab,button=$('login-'+kind+'-tab');button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;$('login-'+kind+'-panel').hidden=!active;if(active&&focus)button.focus();}}
+for(const button of document.querySelectorAll('[data-login-tab]')){button.onclick=()=>selectLoginTab(button.dataset.loginTab);button.onkeydown=e=>{const keys=['password','phone','email','wechat'],index=keys.indexOf(button.dataset.loginTab);if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();selectLoginTab(keys[(index+(e.key==='ArrowRight'?1:keys.length-1))%keys.length],true);}};}
 $('account-logout').onclick=async()=>{if(materialLocked())return;accountBusy=true;$('account-logout').disabled=true;try{const res=await fetch('/api/account/logout',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:'{}'});if(!res.ok)throw new Error('退出失败，请稍后重试。');applyAccount(null);config=await refreshAccess();renderAccess();await loadMajorPreference();historyWarning='';blank();$('breadcrumb-title').textContent='个人中心';renderProfileAccount();await history();}catch(e){profileMessage(e.message);}finally{accountBusy=false;$('account-logout').disabled=false;updatePhoneControls();}};
 function renderMembership(){
  $('profile-membership').hidden=!profileUser;
@@ -325,13 +325,24 @@ function renderMembership(){
 function updatePhoneControls(){
  const remaining=Math.max(0,Math.ceil((phoneRetryAt-Date.now())/1000));
  $('phone-service-status').textContent=phoneEnabled?'':'短信服务待接入，暂时无法登录';
- $('profile-login-note').textContent=phoneEnabled?'首次验证成功会自动注册账户，之后可用手机号登录。未登录时的课堂记录保留在当前浏览器。':'短信服务尚未接入。当前课堂记录仍保存在此浏览器。';
+ $('profile-login-note').textContent='未登录时的课堂记录保留在当前浏览器。';updatePasswordControls();
  for(const id of ['login-phone','phone-code'])$(id).disabled=!phoneEnabled||accountBusy;
  $('phone-send').disabled=!phoneEnabled||accountBusy||remaining>0;
  $('phone-send').textContent=remaining>0?remaining+' 秒后重发':'获取验证码';
  $('phone-submit').disabled=!phoneEnabled||accountBusy||!phoneChallenge;
 }
 async function accountApi(path,body){const response=await fetch(path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await response.json();if(!response.ok)throw new Error(data.error?.message||'账户服务暂不可用');return data;}
+function updatePasswordControls(){for(const id of ['login-username','login-password','password-confirm','password-submit','password-switch'])$(id).disabled=!passwordEnabled||accountBusy;}
+$('password-switch').onclick=()=>{
+ if(accountBusy)return;passwordRegister=!passwordRegister;$('password-confirm-field').hidden=!passwordRegister;$('password-confirm').required=passwordRegister;$('password-confirm').value='';$('login-password').value='';$('login-password').autocomplete=passwordRegister?'new-password':'current-password';$('password-submit').textContent=passwordRegister?'注册并登录':'登录';$('password-switch').textContent=passwordRegister?'已有账号？去登录':'没有账号？注册账号';profileMessage('');
+};
+$('password-form').onsubmit=async event=>{
+ event.preventDefault();if(materialLocked()||!passwordEnabled)return;
+ if(passwordRegister&&$('login-password').value!==$('password-confirm').value){profileMessage('两次输入的密码不一致。');return;}
+ accountBusy=true;updatePasswordControls();profileMessage(passwordRegister?'正在注册…':'正在登录…');
+ try{const data=await accountApi('/api/account/'+(passwordRegister?'register':'login')+'/password',{username:$('login-username').value,password:$('login-password').value});$('login-password').value='';$('password-confirm').value='';applyAccount(data.user);config=await refreshAccess();renderAccess();await loadMajorPreference();historyWarning='';blank();$('breadcrumb-title').textContent='个人中心';renderProfileAccount();await history();profileMessage(passwordRegister?'注册成功，已登录。':'已登录。');}
+ catch(error){profileMessage(error.message);}finally{accountBusy=false;updatePhoneControls();}
+};
 $('login-phone').oninput=()=>{phoneChallenge='';$('phone-code').value='';updatePhoneControls();};
 $('phone-send').onclick=async()=>{
  if(materialLocked()||!phoneEnabled)return;accountBusy=true;updatePhoneControls();profileMessage('正在发送验证码…');

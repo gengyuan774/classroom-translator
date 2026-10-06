@@ -17,6 +17,10 @@ export async function createVerifiedAccountSession(env,{provider,subject,label})
  const subjectHash=await hash(provider+':'+subject);const id=crypto.randomUUID();
  await database(env).prepare('INSERT INTO accounts (id, provider, subject_hash, label, created_at, phone_e164) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(provider, subject_hash) DO NOTHING').bind(id,provider,subjectHash,String(label||'已登录用户').slice(0,120),Date.now(),provider==='phone'?subject:null).run();
  const user=await database(env).prepare('SELECT id, provider, label FROM accounts WHERE provider = ? AND subject_hash = ?').bind(provider,subjectHash).first();
+ return issueAccountSession(env,user);
+}
+// Server-only: the caller must authenticate the account before issuing a session.
+export async function issueAccountSession(env,user){
  const value=Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('');
  await database(env).batch([
   database(env).prepare("INSERT INTO account_memberships (account_id, tier, expires_at, updated_at) VALUES (?, 'none', NULL, ?) ON CONFLICT(account_id) DO NOTHING").bind(user.id,Date.now()),
