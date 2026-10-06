@@ -1,7 +1,7 @@
 import {MAJORS,majorName} from './majors.js';
 import {openLocalMicrophone} from './microphone.js';
 import {LANGUAGES,language,direction} from './languages.js';
-import {setAccount,accountId,storageDescription,getMajorPreference,saveMajorPreference} from './storage.js';
+import {setAccount,accountId,storageDescription,getMajorPreference,saveMajorPreference,setSessionPinned} from './storage.js';
 import {refreshAccess,login,logout} from './access.js';
 import {renderNotes} from '../public/format.js';
 import {localApi} from './local-api.js';
@@ -56,7 +56,7 @@ function render(){
 }
 async function history(){
  const list=await api('/api/sessions');renderProfileHistory(list);$('history-count').textContent=list.length;$('history-select').innerHTML='<option value="">历史课堂</option>'+list.map(s=>`<option value="${s.id}">${escape(s.title)}</option>`).join('');
- $('history').innerHTML=list.length?list.map(s=>`<button class="history-item ${s.id===current?.id?'active':''}" data-id="${s.id}"><strong>${s.demo?'◌':'▤'} ${escape(s.title)}</strong><small>${new Date(s.createdAt).toLocaleDateString('zh-CN')} · ${s.count} 段${s.demo?' · 示例':''}</small></button>`).join(''):'<div class="history-empty">每一节课，都值得留下。<br>你的课堂记录会出现在这里。</div>';
+ $('history').innerHTML=list.length?list.map(s=>`<div class="history-item ${s.id===current?.id?'active':''} ${s.pinned?'pinned':''}" data-id="${s.id}"><button class="history-open" data-history-action="open"><strong>${s.demo?'◌':'▤'} ${escape(s.title)}</strong><small>${new Date(s.createdAt).toLocaleDateString('zh-CN')} · ${s.count} 段${s.demo?' · 示例':''}</small></button><div class="history-actions"><button data-history-action="pin" data-pinned="${s.pinned}" aria-pressed="${s.pinned}" aria-label="${s.pinned?'取消置顶':'置顶'}：${escape(s.title)}">${s.pinned?'已置顶 · 取消':'置顶'}</button><button class="history-delete" data-history-action="delete" aria-label="删除：${escape(s.title)}">删除</button></div></div>`).join(''):'<div class="history-empty">每一节课，都值得留下。<br>你的课堂记录会出现在这里。</div>';
 }
 function blank(){if(materialBusy||languageBusy)return;showClassroom();current=null;selectedLanguage='auto';renderMaterials();partials.clear();$('transcript').innerHTML=initialEmpty;$('title').value='';$('breadcrumb-title').textContent='新的开始';$('segment-count').textContent='0 段';$('summary').hidden=true;$('summary-empty').hidden=false;$('summary-badge').textContent='待生成';updateExportControls();$('retry-summary').hidden=true;$('timer').textContent='00:00:00';$('partial').hidden=true;$('save-state').textContent=storageDescription();elapsed=0;notice('');controls('idle');history().catch(e=>notice(e.message));}
 async function releaseAudio(){
@@ -246,7 +246,21 @@ $('settings-form').onsubmit=async e=>{e.preventDefault();if(accessBusy||material
 $('member-logout').onclick=async()=>{if(accessBusy||materialLocked())return;lockAccess(true);try{config=await logout();$('member-code').value='';renderAccess();notice('已退出会员。');}catch(e){$('settings-error').textContent=e.message;}finally{lockAccess(false);}};
 $('demo').onclick=async()=>{try{current=await api('/api/sessions',{method:'POST',body:JSON.stringify({demo:true})});selectedLanguage='en';controls('ended');render();$('start').hidden=true;notice('这是演示课堂：使用示例字幕与笔记，不采集麦克风，不调用 API。');await history();}catch(e){notice(e.message);}};
 async function openHistory(id){if(!id)return;if(materialBusy||languageBusy||['recording','paused','connecting','finishing'].includes(mode)){notice('请先完成当前操作或结束课堂，再打开其他记录。');return;}try{showClassroom();current=await api('/api/sessions/'+id);selectedLanguage=language(current.sourceLanguage).code;$('transcript').innerHTML=initialEmpty;controls(current.status==='ready'?'idle':'ended');elapsed=0;notice('');render();if(current.demo)$('start').hidden=true;await history();}catch(e){notice(e.message);}};
-$('history').onclick=e=>openHistory(e.target.closest('[data-id]')?.dataset.id);
+let historyActionBusy=false;
+function confirmCourseDelete(title){const dialog=$('course-delete-dialog');$('course-delete-name').textContent=title;dialog.returnValue='cancel';return new Promise(resolve=>{dialog.addEventListener('close',()=>resolve(dialog.returnValue==='delete'),{once:true});dialog.showModal();});}
+$('history').onclick=async e=>{
+ const button=e.target.closest('[data-history-action]'),row=button?.closest('[data-id]');if(!row||historyActionBusy)return;
+ const id=row.dataset.id,action=button.dataset.historyAction;
+ if(action==='open'){await openHistory(id);return;}
+ if(action==='delete'&&(materialBusy||languageBusy||(current?.id===id&&['recording','paused','connecting','finishing'].includes(mode)))){notice('请先完成当前操作或结束课堂，再删除。');return;}
+ if(action==='delete'&&!await confirmCourseDelete(row.querySelector('strong').textContent))return;
+ historyActionBusy=true;button.disabled=true;
+ try{
+  if(action==='pin')await setSessionPinned(id,button.dataset.pinned!=='true');
+  else{await api('/api/sessions/'+id,{method:'DELETE'});if(current?.id===id)blank();}
+  await history();
+ }catch(error){notice(error.message);}finally{historyActionBusy=false;button.disabled=false;}
+};
 $('history-select').onchange=e=>openHistory(e.target.value);
 $('retry-summary').onclick=async()=>{if(!current)return;if(!config.hasKey&&(!current.demo||current.materials?.length)){$('settings').showModal();return;}controls('finishing');notice('正在重新整理课堂笔记…');try{current=await api(`/api/sessions/${current.id}/summary`,{method:'POST'});controls('ended');render();if(current.demo)$('start').hidden=true;notice('总结已生成，'+(accountId()?'完整笔记已保存到账户。':'完整笔记已保存在当前浏览器。'));if($('auto-export').checked)await download('pdf');}catch(e){controls('ended');notice(e.message);render();}};
 $('export-pdf').onclick=()=>download('pdf');$('export-md').onclick=()=>download('md');$('export-html').onclick=()=>download('html');

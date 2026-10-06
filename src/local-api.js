@@ -1,4 +1,4 @@
-import {getMajorPreference,saveSession,getSession,listSessions,saveMaterial,getMaterial,removeMaterial} from './storage.js';
+import {getMajorPreference,saveSession,getSession,listSessions,saveMaterial,getMaterial,removeMaterial,deleteSession} from './storage.js';
 import {summarize,translateSegment} from './core.js';
 import {getKey,accessConfig,setOwnKey} from './access.js';
 import {validLanguage,setSessionLanguage} from './languages.js';
@@ -30,6 +30,7 @@ export async function localApi(route,options={}){
  if(!match)throw new Error('未找到操作');
  const [,id,action,materialId]=match;
  if(busy.has(id)&&method!=='GET')throw new Error('请先完成当前课堂操作');
+ if(!action&&method==='DELETE')return deleteSession(id);
  const s=await getSession(id);
  if(!action){if(method==='PATCH'){if(s.demo)throw new Error('演示课堂使用固定英语内容');setSessionLanguage(s,data.sourceLanguage);await saveSession(s);}return s;}
  if(action==='materials'&&method==='GET'){if(!materialId)return s.materials; if(!s.materials.some(m=>m.id===materialId))throw new Error('这份资料不属于当前课堂');return getMaterial(id,materialId);}

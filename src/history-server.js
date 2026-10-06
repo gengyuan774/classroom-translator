@@ -37,6 +37,16 @@ export async function historyRoute(request,env,user,path,data){
    if(material)await removeObject(env,material.object_key);return {ok:true};
   }
  }else{
+  if(request.method==='DELETE'){
+   if(!existing)throw new MemberError('记录不存在。',404);
+   const materials=await env.DB.prepare('SELECT object_key FROM account_materials WHERE account_id = ? AND class_id = ?').bind(owner,id).all();
+   await env.DB.batch([
+    env.DB.prepare('DELETE FROM account_materials WHERE account_id = ? AND class_id = ?').bind(owner,id),
+    env.DB.prepare('DELETE FROM account_classes WHERE account_id = ? AND id = ?').bind(owner,id)
+   ]);
+   await Promise.all([existing.object_key,...materials.results.map(m=>m.object_key)].map(key=>removeObject(env,key)));
+   return {ok:true};
+  }
   if(request.method==='GET'){if(!existing)throw new MemberError('记录不存在。',404);return {session:await readObject(env,existing.object_key),revision:existing.revision};}
   if(request.method==='PUT'){
    const s=cleanSession(data?.session,id),revision=data.revision;

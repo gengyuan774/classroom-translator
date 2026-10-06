@@ -13,3 +13,14 @@
 .export-buttons{flex-wrap:wrap}.export-buttons #export-pdf{flex:1 0 100%;font-size:14px}.export-status{font-size:12px;line-height:1.7;color:#52654e;margin:10px 0 0;overflow-wrap:anywhere}
 
 .profile-major-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:26px;margin-bottom:24px}.profile-major-card h2{margin-bottom:12px}.profile-major-card p{font-size:14px;line-height:1.8;color:#6d7d64}.major-fields{display:flex;align-items:flex-end;flex-wrap:wrap;gap:14px}.major-fields select{font:inherit;font-size:16px;min-width:240px;max-width:100%;padding:12px 32px 12px 12px;border:1px solid #d9e1d2;border-radius:7px;color:#314d37;background:white}.major-fields select:focus-visible{outline:3px solid #aebf78;outline-offset:3px}.major-fields button{font-size:15px;min-height:45px}.major-fields label{margin-top:0}.major-scope{margin-bottom:0}#major-status{margin-bottom:0;color:#315337}@media(max-width:620px){.profile-major-card{padding:20px}.major-fields{display:block}.major-fields select{width:100%;min-width:0}#custom-major-field{margin-top:16px}.major-fields button{margin-top:16px}}
+
+/* Course controls and persistent pinned highlight. */
+.history-item{padding:0;border:2px solid transparent;overflow:hidden}
+.history-item.pinned{border-color:#e6bc35;box-shadow:0 0 0 1px #f7dda0;background:#fff9df}
+.history-item.pinned.active{background:#fff2bd;border-color:#d9a914}
+.history-open{display:block;width:100%;text-align:left;border:0;border-radius:0;background:transparent;padding:11px 9px 7px}
+.history-actions{display:flex;align-items:center;justify-content:space-between;padding:0 6px 6px;gap:4px}
+.history-actions button{background:transparent;border:0;padding:5px 4px;font-size:10px;color:#6d7d61}
+.history-actions button[aria-pressed=true]{color:#8e6905;font-weight:600}
+.history-actions .history-delete{color:#a46652}
+.history-actions button:hover{background:#ffffff90}

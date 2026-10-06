@@ -10,6 +10,19 @@ export function setAccount(user){account=user?.id||null;}
 export function accountId(){return account;}
 export async function getMajorPreference(){return normalizeMajor((await cached(account,'preferences','major'))?.value);}
 export async function saveMajorPreference(value){const major=normalizeMajor(value);await put(account,'preferences',{id:'major',value:major});return major;}
+export async function setSessionPinned(id,pinned){await getSession(id);await put(account,'preferences',{id:'pin:'+id,pinned:pinned===true});}
+export function deleteSession(id){const owner=account;return serial(owner,id,async()=>{
+ if(owner)await cloud(owner,'/'+id,{method:'DELETE'});
+ const db=await database(owner);
+ await new Promise((resolve,reject)=>{
+  const tx=db.transaction(['sessions','materials','sync'],'readwrite');
+  tx.objectStore('sessions').delete(id);tx.objectStore('sync').delete(id);
+  const cursor=tx.objectStore('materials').openCursor();cursor.onsuccess=()=>{const row=cursor.result;if(!row)return;if(String(row.key).startsWith(id+':'))row.delete();row.continue();};
+  tx.oncomplete=resolve;tx.onerror=()=>reject(new Error('删除失败，请重试'));tx.onabort=()=>reject(new Error('删除失败，请重试'));
+ });
+ await transaction(owner,'preferences','readwrite',store=>store.delete('pin:'+id));
+ return {ok:true};
+});}
 export function storageDescription(){return account?'课堂记录保存到账户':'课堂记录保存在当前浏览器';}
 function report(message){if(typeof window!=='undefined')window.dispatchEvent(new CustomEvent('history-save-warning',{detail:message}));}
 async function cloud(owner,path,{method='GET',body}={}){const response=await fetch('/api/history'+path,{method,credentials:'same-origin',headers:{'X-Account-ID':owner,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const data=await response.json();if(!response.ok)throw new Error(data.error?.message||'账户历史记录暂不可用');return data;}
@@ -27,10 +40,12 @@ export async function getSession(id){const owner=account;
 }
 const metadata=({id,title,createdAt,status,segments,demo})=>({id,title,createdAt,status,count:segments.length,demo});
 export async function listSessions(){const owner=account;
+ const pins=new Set((await transaction(owner,'preferences','readonly',store=>store.getAll())).filter(x=>x.id.startsWith('pin:')&&x.pinned).map(x=>x.id.slice(4)));
+ const sorted=items=>items.map(s=>({...s,pinned:pins.has(s.id)})).sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b.createdAt.localeCompare(a.createdAt));
  const local=(await transaction(owner,'sessions','readonly',store=>store.getAll())).map(metadata);
- if(!owner)return local.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
+ if(!owner)return sorted(local);
  const remote=await cloud(owner,'');const pending=(await transaction(owner,'sync','readonly',store=>store.getAll())).filter(s=>s.pending).map(s=>s.id);
- return [...remote.filter(s=>!pending.includes(s.id)),...local.filter(s=>pending.includes(s.id))].sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
+ return sorted([...remote.filter(s=>!pending.includes(s.id)),...local.filter(s=>pending.includes(s.id))]);
 }
 export async function saveMaterial(sessionId,m){const owner=account;await put(owner,'materials',{...m,key:sessionId+':'+m.id});if(owner)await cloud(owner,'/'+sessionId+'/materials/'+m.id,{method:'PUT',body:m});}
 export async function getMaterial(sessionId,id){const owner=account;if(owner){const result=await cloud(owner,'/'+sessionId+'/materials/'+id);await put(owner,'materials',{...result,key:sessionId+':'+id});return result;}const m=await cached(owner,'materials',sessionId+':'+id);if(!m)throw new Error('当前课堂的资料不存在');return m;}

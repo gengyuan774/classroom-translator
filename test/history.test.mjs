@@ -5,7 +5,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import {handle} from '../src/worker.js';
 import {createVerifiedAccountSession} from '../src/account-server.js';
-import {setAccount,saveSession,getSession,listSessions,saveMaterial,getMaterial} from '../src/storage.js';
+import {setAccount,saveSession,getSession,listSessions,saveMaterial,getMaterial,setSessionPinned,deleteSession} from '../src/storage.js';
 function runtime(){
  const sql=new DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
  for(const file of ['0000_small_gwen_stacy.sql','0001_melted_sabra.sql'])sql.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
@@ -59,4 +59,26 @@ test('browser storage switches accounts without mixing guest or account records'
   active=a;setAccount(a.user);assert.equal((await listSessions())[0].id,s.id);
   setAccount(null);assert.equal((await listSessions()).some(x=>x.id===s.id),false);
  }finally{globalThis.fetch=original;setAccount(null);}
+});
+test('pinning survives subsequent saves; deleting a class removes only its own local data',async()=>{
+ setAccount(null);const older=session(),newer=session();older.createdAt='2025-01-01T00:00:00Z';newer.createdAt='2026-01-01T00:00:00Z';
+ await saveSession(older);await saveSession(newer);await setSessionPinned(older.id,true);
+ older.summary='继续保存字幕';await saveSession(older);
+ assert.equal((await listSessions())[0].id,older.id);
+ await setSessionPinned(older.id,false);assert.ok((await listSessions()).findIndex(s=>s.id===newer.id)<(await listSessions()).findIndex(s=>s.id===older.id));
+ await setSessionPinned(older.id,true);
+ const mid=crypto.randomUUID();await saveMaterial(older.id,{id:mid,name:'a.txt'});await saveMaterial(newer.id,{id:mid,name:'b.txt'});
+ await deleteSession(older.id);assert.equal((await listSessions()).some(s=>s.id===older.id),false);
+ await assert.rejects(()=>getSession(older.id));await assert.rejects(()=>getMaterial(older.id,mid));
+ assert.equal((await getMaterial(newer.id,mid)).name,'b.txt');
+ await saveSession(older);assert.equal((await listSessions()).find(s=>s.id===older.id).pinned,false);
+});
+test('account deletion enforces ownership and removes class plus material objects',async()=>{
+ const {env,objects}=runtime(),a=await user(env,'delete-a@example.test'),b=await user(env,'delete-b@example.test'),s=session();
+ const call=(path,who,method,body)=>handle(request(path,who,method,body),noProvider,env);
+ await call('/api/history/'+s.id,a,'PUT',{session:s,revision:0});
+ const mid=crypto.randomUUID();await call('/api/history/'+s.id+'/materials/'+mid,a,'PUT',{id:mid,name:'a.txt',pages:[{label:'1',text:'资料'}]});
+ assert.equal(objects.size,2);assert.equal((await call('/api/history/'+s.id,b,'DELETE')).status,404);assert.equal(objects.size,2);
+ assert.equal((await call('/api/history/'+s.id,a,'DELETE')).status,200);assert.equal(objects.size,0);
+ assert.equal((await call('/api/history/'+s.id,a)).status,404);assert.equal((await (await call('/api/history',a)).json()).length,0);
 });
