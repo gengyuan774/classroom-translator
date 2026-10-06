@@ -23,7 +23,20 @@ export class BrowserLive{
   if(e.type==='pause'){this.paused=true;this.turns?.flush();this.session.status='paused';await this.persist();this.emit({type:'paused'});}
   if(e.type==='resume'){
    if(this.upstream?.readyState===1&&Date.now()-this.connectedAt<54*60*1000){
-    if(this.appliedLanguage!==language(this.session.sourceLanguage).code){this.paused=true;this.connectTimer=setTimeout(()=>{this.paused=true;this.emit({type:'fatal',message:'语言切换超时，请重新连接'});this.upstream.close();},20000);this.sendConfiguration();return;}
+    if(this.appliedLanguage!==language(this.session.sourceLanguage).code){
+     this.paused=true;
+     if(language(this.session.sourceLanguage).code==='auto'){
+      // Omitting a field in an update may retain the old hint. Start a fresh
+      // session for auto detection, after the previous audio has finished.
+      const deadline=Date.now()+20000;
+      while(this.pending>0&&!this.closed&&!this.closing&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,50));
+      if(this.closed||this.closing)return;
+      if(this.pending>0)throw new Error('上一段语音仍在识别，请稍后点击继续录音。');
+      this.meta=[];this.started=Date.now();this.base=(this.session.segments.at(-1)?.offset||0)+1000;
+      await this.connect();return;
+     }
+     this.connectTimer=setTimeout(()=>{this.paused=true;this.emit({type:'fatal',message:'语言切换超时，请重新连接'});this.upstream.close();},20000);this.sendConfiguration();return;
+    }
     this.paused=false;this.session.status='recording';await this.persist();this.emit({type:'ready'});}
    else {this.paused=true;if(this.pending)this.warn('重新连接前部分语音未识别完成，记录可能存在缺失。');this.pending=0;this.meta=[];this.started=Date.now();this.base=(this.session.segments.at(-1)?.offset||0)+1000;await this.connect();}
   }
@@ -36,10 +49,10 @@ export class BrowserLive{
  }
  sendConfiguration(){
   this.configuringLanguage=language(this.session.sourceLanguage).code;
-  this.upstream.send(JSON.stringify({type:'session.update',session:{type:'transcription',audio:{input:{format:{type:'audio/pcm',rate:24000},transcription:transcriptionConfig(this.configuringLanguage,this.session.title,{reset:true}),turn_detection:null}}}}));
+  this.upstream.send(JSON.stringify({type:'session.update',session:{type:'transcription',audio:{input:{format:{type:'audio/pcm',rate:24000},transcription:transcriptionConfig(this.configuringLanguage,this.session.title),turn_detection:null}}}}));
  }
  async connect(){
-  if(this.upstream){this.upstream.onclose=null;this.upstream.close();}clearTimeout(this.limitTimer);clearTimeout(this.connectTimer);
+  if(this.upstream){this.upstream.onclose=null;this.upstream.onmessage=null;this.upstream.onerror=null;this.upstream.close();}clearTimeout(this.limitTimer);clearTimeout(this.connectTimer);
   const response=await fetch('/api/openai/token',{method:'POST',headers:{...authHeaders(getKey()),'Content-Type':'application/json'},body:JSON.stringify({title:this.session.title,sourceLanguage:language(this.session.sourceLanguage).code}),signal:AbortSignal.timeout(20000)});
   const data=await response.json();if(!response.ok)throw new Error(data.error?.message||data.error||'无法创建实时转写连接');
   const secret=data.value||data.client_secret?.value;if(!secret)throw new Error('没有取得实时连接凭据');

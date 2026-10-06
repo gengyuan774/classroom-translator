@@ -15,7 +15,7 @@ export function setSessionLanguage(session,code){
  session.sourceLanguage=code;
 }
 export function sessionDirection(s){const codes=[...new Set(s.segments.filter(r=>r.source?.trim()).map(r=>language(r.sourceLanguage||s.sourceLanguage).code))];return (codes.length?codes.map(c=>language(c).label).join(' / '):language(s.sourceLanguage).label)+' → 中文';}
-export function transcriptionConfig(code,title,{reset=false}={}){
+export function transcriptionConfig(code,title){
  const selected=language(code);
- return {model:'gpt-live-transcribe',...(selected.code==='auto'?(reset?{languages:[]}:{}):{languages:[selected.code]}),delay:'low',prompt:'A classroom lecture. Transcribe speech in its original language without translating it. Course: '+String(title||'').slice(0,120)};
+ return {model:'gpt-live-transcribe',...(selected.code==='auto'?{}:{languages:[selected.code]}),delay:'low',prompt:'A classroom lecture. Transcribe speech in its original language without translating it. Course: '+String(title||'').slice(0,120)};
 }
